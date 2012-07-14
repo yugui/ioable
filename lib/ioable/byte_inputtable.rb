@@ -38,11 +38,29 @@ module IOable::CommonIOable
     eof?
   end
 
-  def fcntl(cmd, arg = 0) end
-  def ioctl(cmd, arg = 0) end
+  def fcntl(cmd, arg = 0)
+    raise NotimplementedError
+  end
+  def ioctl(cmd, arg = 0)
+    raise NotimplementedError
+  end
   def isatty; false end
   alias tty? isatty
   def pid; nil end
+  def fileno; nil end
+
+  def fdatasync; nil end
+  def fsync; nil end
+  def sync; nil end
+  def sync=(value); end
+
+  def reopen(*args)
+    raise NotimplementedError
+  end
+
+  def to_io
+    self
+  end
 end
 
 module IOable::CommonInputtable
@@ -52,8 +70,9 @@ end
 
 # Provides higher level byte-wide input methods to IO-like classes.
 # Classes which includes this module must define at least the following methods:
-# * seek
+# * sysseek
 # * sysread
+# * eof?
 module IOable::ByteInputtable
   include IOable::CommonInputtable
 
@@ -69,6 +88,7 @@ module IOable::ByteInputtable
 
   def seek(offset, whence = IO::SEEK_SET)
     @pos = sysseek(offset, whence)
+    return 0
   end
 
   def rewind
@@ -76,7 +96,10 @@ module IOable::ByteInputtable
   end
 
   def getbyte
-    if eof?
+    if !@buf.nil?
+      b, @buf = @buf, nil
+      return b
+    elsif eof?
       return nil
     else
       b = sysread(1)[0].ord
@@ -98,6 +121,20 @@ module IOable::ByteInputtable
     return enum_for(:each_byte) unless block_given?
     while b = getbyte
       yield b
+    end
+  end
+
+  def ungetbyte(b)
+    case b
+    when Integer
+      raise TypeError, "must be in 0...256, but got #{b}" unless (0...256).include?(b)
+      @buf = b
+
+    when String
+      @buf = b[0].ord
+
+    else
+      raise TypeError, "expected a byte or a string, but got #{b.class}"
     end
   end
 end

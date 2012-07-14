@@ -230,6 +230,11 @@ describe IOable::ByteInputtable do
 
       @io.pos.should == 0
     end
+
+    it "should return zero" do
+      @io.seek(10).should == 0
+      @io.seek(10).should == 0
+    end
   end
 
   describe '#rewind' do
@@ -245,6 +250,40 @@ describe IOable::ByteInputtable do
       mock(@io).sysseek(0, IO::SEEK_SET)
 
       @io.rewind
+    end
+    it "should return zero" do
+      @io.rewind.should == 0
+    end
+  end
+
+  describe "#to_io" do
+    it "should return self" do
+      @io.to_io.should be_equal(@io)
+    end
+  end
+
+  describe "#ungetbyte" do
+    it "should accept an integer" do
+      lambda { @io.ungetbyte(1) }.should_not raise_error
+    end
+    it "should not accept any negative integer" do
+      lambda { @io.ungetbyte(0) }.should_not raise_error
+      lambda { @io.ungetbyte(-1) }.should raise_error(TypeError)
+    end
+    it "should not accept >= 256" do
+      lambda { @io.ungetbyte(255) }.should_not raise_error
+      lambda { @io.ungetbyte(256) }.should raise_error(TypeError)
+    end
+    it "should accept a single byte string" do
+      lambda { @io.ungetbyte("a") }.should_not raise_error
+    end
+
+    it "should make the next call of #getbyte return the given byte" do
+      @io.ungetbyte(1)
+      @io.getbyte.should == 1
+
+      @io.ungetbyte("a")
+      @io.getbyte.should == ?a.ord
     end
   end
 end
