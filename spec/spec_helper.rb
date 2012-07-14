@@ -12,4 +12,12 @@ RSpec.configure do |config|
 end
 
 $:.unshift(File.dirname(__FILE__) + '/../lib')
-require 'ioable'
+
+def binary(str)
+  str.force_encoding(Encoding::ASCII_8BIT)
+end
+
+def utf8(str)
+  str.force_encoding(Encoding::UTF_8)
+end
+
