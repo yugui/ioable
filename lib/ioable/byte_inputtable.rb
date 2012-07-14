@@ -50,51 +50,30 @@ module IOable::CommonInputtable
   alias close_read close
 end
 
-tellable = Module.new do
+# Provides higher level byte-wide input methods to IO-like classes.
+# Classes which includes this module must define at least the following methods:
+# * seek
+# * sysread
+module IOable::ByteInputtable
+  include IOable::CommonInputtable
+
   def pos
     @pos ||= 0
   end
-
   alias tell pos
-end
 
-IOable::Seekable = Module.new do
-  include tellable
   def pos=(value)
     seek(value, IO::SEEK_SET)
     @pos = value
   end
 
+  def seek(offset, whence = IO::SEEK_SET)
+    @pos = sysseek(offset, whence)
+  end
+
   def rewind
     self.pos = 0
   end
-end
-
-IOable::NonSeekable = Module.new do
-  include tellable
-  def pos=(value)
-    raise Errno::ESPIPE, 'Illegal seek'
-  end
-  def rewind
-    raise Errno::ESPIPE, 'Illegal seek'
-  end
-  def seek(pos, offset)
-    raise Errno::ESPIPE, 'Illegal seek'
-  end
-end
-
-# Provides higher level byte-wide input methods to IO-like classes.
-# Classes which includes this module must define at least the following methods:
-# * seek
-# * sysread
-IOable::ByteInputtable = Module.new do
-  include IOable::CommonInputtable
-  include tellable
-
-  def pos
-    @pos ||= 0
-  end
-  alias tell pos
 
   def getbyte
     if eof?

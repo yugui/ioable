@@ -164,4 +164,87 @@ describe IOable::ByteInputtable do
       @io.closed?.should be_false
     end
   end
+
+  describe '#pos' do
+    before do
+      stub(@io).sysseek(is_a(Integer), anything)
+    end
+    it "should return 0 at first" do
+      @io.pos.should == 0
+    end
+
+    it "should return the given value on set" do
+      (@io.pos = 10).should == 10
+    end
+
+    it "should remember the given value" do
+      @io.pos = 10
+      @io.pos.should == 10
+    end
+
+    it "should call #sysseek on called" do
+      mock(@io).sysseek(10, IO::SEEK_SET)
+
+      @io.pos = 10
+    end
+  end
+
+  describe "#seek" do
+    before do
+      stub(@io).sysseek(is_a(Integer), anything)
+    end
+
+    it "should call #sysseek" do
+      mock(@io).sysseek(10, IO::SEEK_CUR)
+      
+      @io.seek(10, IO::SEEK_CUR)
+    end
+
+    it "should use IO::SEEK_SET if not specified the argument" do
+      mock(@io).sysseek(10, IO::SEEK_SET)
+      
+      @io.seek(10)
+    end
+
+    it "should set #pos to the given position" do
+      mock(@io).sysseek(10, IO::SEEK_SET) { 10 }
+      @io.seek(10)
+      @io.pos.should == 10
+
+      mock(@io).sysseek(10, IO::SEEK_CUR) { 20 }
+      @io.seek(10, IO::SEEK_CUR)
+      @io.pos.should == 20
+    end
+    
+    it 'should pass through the error sysseek rises' do
+      mock(@io).sysseek(10, IO::SEEK_SET) { raise Errno::ESPIPE }
+      lambda { @io.seek(10) }.should raise_error(Errno::ESPIPE)
+
+      mock(@io).sysseek(100, IO::SEEK_SET) { raise Errno::EINVAL }
+      lambda { @io.seek(100) }.should raise_error(Errno::EINVAL)
+    end
+
+    it 'should not change #pos on error' do
+      stub(@io).sysseek(is_a(Integer), anything) { raise Errno::EBADF }
+      @io.seek(10) rescue nil
+
+      @io.pos.should == 0
+    end
+  end
+
+  describe '#rewind' do
+    before do
+      stub(@io).sysseek(is_a(Integer), anything)
+    end
+    it "should change #pos to zero" do
+      @io.pos = 10
+      @io.rewind
+      @io.pos.should == 0
+    end
+    it "should call sysseek on called" do
+      mock(@io).sysseek(0, IO::SEEK_SET)
+
+      @io.rewind
+    end
+  end
 end
