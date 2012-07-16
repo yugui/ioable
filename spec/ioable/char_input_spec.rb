@@ -1,4 +1,4 @@
-#-*- encoding: US-ASCII -*-
+#-*- encoding: UTF-8 -*-
 
 require File.expand_path("../../spec_helper", __FILE__)
 require File.expand_path("../shared/empty_input_impl_spec.rb", __FILE__)
@@ -225,26 +225,150 @@ describe IOable::CharInput do
 
   describe '#read' do
     before do
-      mock(@byte_input).eof?{ false }
-      mock(@byte_input).sysread(is_a(Integer)){ binary("abcdefg\n") }
-      mock(@byte_input).eof?{ false }
-      mock(@byte_input).sysread(is_a(Integer)){ binary("hijk") }
-      mock(@byte_input).eof?{ false }
-      mock(@byte_input).sysread(is_a(Integer)){ binary("lmnopqr\n") }
-      mock(@byte_input).eof?{ true }
+      seq = [
+        binary("abcdefg\n"),
+        binary("hijk"),
+        binary("あ"),
+        binary("lmnopqr\n")
+      ]
+      stub(@byte_input).eof?{ seq.empty? }
+      stub(@byte_input).sysread(is_a(Integer)){|n,| 
+        raise RuntimeError, "wrong stub" if n < seq.first.size
+        seq.shift
+      }
     end
 
     describe "on no arguments given" do
-      it "should return the whole of the contents" do
-        @io.read.should == "abcdefg\nhijklmnopqr\n"
+      it "should call sysread until eof" do
+        eof = false
+        mock(@byte_input).eof?{ eof }.at_least(1)
+        mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+        mock(@byte_input).sysread(is_a(Integer)) { binary("\ndefg") }
+        mock(@byte_input).sysread(is_a(Integer)) { binary("あ") }
+        mock(@byte_input).sysread(is_a(Integer)) { 
+          eof = true
+          binary("hijkl\n")
+        }
+
+        @io.read
       end
+
+      it "should return the whole of the contents" do
+        @io.read.should == "abcdefg\nhijkあlmnopqr\n"
+      end
+
       it "should return a String in a text encoding" do
         @io.read.encoding.should == Encoding::UTF_8
       end
+
       it "should convert encoding if the external and the internal differ" do
-        @io.set_encoding(Encoding::CP932, Encoding::UTF_16LE)
+        @io.set_encoding(Encoding::UTF_8, Encoding::UTF_16LE)
         result = @io.read
-        result.should == "abcdefg\nhijklmnopqr\n".encode(Encoding::UTF_16LE)
+        result.encoding.should == Encoding::UTF_16LE
+        result.should == "abcdefg\nhijkあlmnopqr\n".encode(Encoding::UTF_16LE)
+      end
+
+      it "should not convert encoding if the internal encoding is nil" do
+        @io.set_encoding(Encoding::CP932, nil)
+        result = @io.read
+        result.should == "abcdefg\nhijkあlmnopqr\n".force_encoding(Encoding::CP932)
+      end
+
+      it "should return nil if eof" do
+        @io.read
+        @io.read.should be_nil
+      end
+
+      it "should advance #pos by the length of the returned text if no conversion happened" do
+        str = @io.read
+        @io.pos.should == str.bytesize
+      end
+
+      it "should advance #pos by the actually consumed bytesize , but not by the bytesize of the resturned text on a conversion happened" do
+        @io.set_encoding(Encoding::CP932, Encoding::UTF_16LE)
+        str = @io.read
+        @io.pos.should_not == str.bytesize
+        @io.pos.should == "abcdefg\nhijkあlmnopqr\n".bytesize
+      end
+
+      it "should start reading from #pos" do
+        @io.read(3)
+        @io.pos.should == 3
+
+        @io.read.should == "defg\nhijkあlmnopqr\n"
+      end
+
+      it "does not change the internal state on error" do
+        eof = false
+        mock(@byte_input).eof?{ eof }.at_least(1)
+        mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+        mock(@byte_input).sysread(is_a(Integer)) { raise Errno::ETIMEDOUT }
+        mock(@byte_input).sysread(is_a(Integer)) { eof = true; binary("def") }
+
+        lambda { @io.read }.should raise_error(Errno::ETIMEDOUT)
+        @io.pos.should == 0
+        @io.read.should == "abcdef"
+      end
+
+      it "should replace the second argument and return it if it is given" do
+        buf = "something different"
+        returned = @io.read(nil, buf)
+
+        returned.should be_equal(buf)
+        buf.should == "abcdefg\nhijkあlmnopqr\n"
+      end
+    end
+
+    describe "on a length given as an argument" do
+      it "should return the specified number of bytes if available" do
+        @io.read(3).should == binary("abc")
+      end
+
+      it "should return a binary string" do
+        @io.read(3).encoding.should == Encoding::ASCII_8BIT
+      end
+
+      it "should return the all available bytes if eof?" do
+        str = @io.read(24)
+        str.should == binary("abcdefg\nhijkあlmnopqr\n")
+        str.encoding.should == Encoding::ASCII_8BIT
+      end
+
+      it "should returns nil if eof" do
+        @io.read(24)
+
+        @io.read(3).should be_nil
+      end
+
+      it "should return an empty string if eof but the length is zero" do
+        @io.read(24)
+
+        @io.read(0).should be_empty
+        @io.read(0).encoding.should == Encoding::ASCII_8BIT
+      end
+
+      it "does not change the internal state on error" do
+        eof = false
+        mock(@byte_input).eof?{ eof }.at_least(1)
+        mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+        mock(@byte_input).sysread(is_a(Integer)) { raise Errno::ETIMEDOUT }
+        mock(@byte_input).sysread(is_a(Integer)) { eof = true; binary("def") }
+
+        lambda { @io.read(5) }.should raise_error(Errno::ETIMEDOUT)
+        @io.pos.should == 0
+        @io.read(6).should == binary("abcdef")
+      end
+
+      it "should replace the second argument and return it if it is given" do
+        buf = "something different"
+        returned = @io.read(10, buf)
+
+        returned.should be_equal(buf)
+        buf.should == "abcdefg\nhi"
+
+        returned = @io.read(0, buf)
+        returned.should be_equal(buf)
+        buf.should == ""
       end
     end
   end

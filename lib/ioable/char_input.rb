@@ -143,9 +143,9 @@ class IOable::CharInput
   end
 
   def gets
-    offset = 0
-    until index = @buf.index($/, offset)
-      offset = @buf.length
+    start_offset = 0
+    until index = @buf.index($/, start_offset)
+      start_offset = @buf.length
       fillbuf
     end
     line = @buf[0..index]
@@ -153,24 +153,56 @@ class IOable::CharInput
     return line
   end
 
-  def read
-    result = @buf.dup
-    until @byte_input.eof?
-      fillbuf
-      result << @buf
+  def read(length = nil, outbuf = "")
+    if @buf.empty? and @byte_input.eof?
+      return length == 0 ? outbuf.replace("".force_encoding(Encoding::ASCII_8BIT)) : nil
+    end
+
+    if length.nil?
+      outbuf.replace(@buf)
       @buf.clear
+      begin
+        until @byte_input.eof?
+          fillbuf
+          outbuf << @buf
+          @buf.clear
+        end
+      rescue Object
+        @buf[0...0] = outbuf
+        raise
+      end
+      outbuf.force_encoding(@external_encoding)
+      @pos += outbuf.bytesize
+
+      if @internal_encoding and @internal_encoding != @external_encoding
+        outbuf.encode!(@internal_encoding)
+      end
+      return outbuf
+    else
+      outbuf.replace("".force_encoding(Encoding::ASCII_8BIT))
+      begin
+        loop do
+          new_chunk = @buf[0...length]
+          outbuf << new_chunk
+          length -= new_chunk.length
+          @buf[0...new_chunk.length] = ""
+          break if length == 0 or @byte_input.eof?
+          fillbuf
+        end
+      rescue Object
+        @buf[0...0] = outbuf
+        raise
+      end
+      @pos += outbuf.bytesize
+      return outbuf
     end
-    result.force_encoding(@external_encoding)
-    if @internal_encoding and @internal_encoding != @external_encoding
-      result.encode!(@internal_encoding)
-    end
-    return result
   end
 
   private
   INPUTTABLE_BUF_READ_SIZE = 256
   def fillbuf
-    @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE)
+    raise unless @buf.encoding == Encoding::ASCII_8BIT
+    @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE).force_encoding(Encoding::ASCII_8BIT)
   rescue Errno::EAGAIN
     retry
   end
