@@ -38,6 +38,31 @@ shared_examples_for 'byte-wide input' do
     end
   end
 
+  describe "#ungetbyte" do
+    it "should accept an integer" do
+      lambda { @io.ungetbyte(1) }.should_not raise_error
+    end
+    it "should not accept any negative integer" do
+      lambda { @io.ungetbyte(0) }.should_not raise_error
+      lambda { @io.ungetbyte(-1) }.should raise_error(TypeError)
+    end
+    it "should not accept >= 256" do
+      lambda { @io.ungetbyte(255) }.should_not raise_error
+      lambda { @io.ungetbyte(256) }.should raise_error(TypeError)
+    end
+    it "should accept a single byte string" do
+      lambda { @io.ungetbyte("a") }.should_not raise_error
+    end
+
+    it "should make the next call of #getbyte return the given byte" do
+      @io.ungetbyte(1)
+      @io.getbyte.should == 1
+
+      @io.ungetbyte("a")
+      @io.getbyte.should == ?a.ord
+    end
+  end
+
   describe '#readbyte' do
     it "should read a byte from sysread and return it" do
       mock(@io).eof?{ false }
@@ -106,24 +131,6 @@ shared_examples_for 'byte-wide input' do
     it "should advance pos" do
       @io.each_byte{}
       @io.pos.should == 2
-    end
-  end
-
-  describe '#close' do
-    it "should do nothing by default" do
-      class << @io = mock!
-        include IOable::ByteInputtable
-      end
-      @io.close
-    end
-  end
-
-  describe '#close_read' do
-    it "should do nothing by default" do
-      class << @io = mock!
-        include IOable::ByteInputtable
-      end
-      @io.close_read
     end
   end
 
@@ -221,31 +228,6 @@ shared_examples_for 'byte-wide input' do
   describe "#to_io" do
     it "should return self" do
       @io.to_io.should be_equal(@io)
-    end
-  end
-
-  describe "#ungetbyte" do
-    it "should accept an integer" do
-      lambda { @io.ungetbyte(1) }.should_not raise_error
-    end
-    it "should not accept any negative integer" do
-      lambda { @io.ungetbyte(0) }.should_not raise_error
-      lambda { @io.ungetbyte(-1) }.should raise_error(TypeError)
-    end
-    it "should not accept >= 256" do
-      lambda { @io.ungetbyte(255) }.should_not raise_error
-      lambda { @io.ungetbyte(256) }.should raise_error(TypeError)
-    end
-    it "should accept a single byte string" do
-      lambda { @io.ungetbyte("a") }.should_not raise_error
-    end
-
-    it "should make the next call of #getbyte return the given byte" do
-      @io.ungetbyte(1)
-      @io.getbyte.should == 1
-
-      @io.ungetbyte("a")
-      @io.getbyte.should == ?a.ord
     end
   end
 end

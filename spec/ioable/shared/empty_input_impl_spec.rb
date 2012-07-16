@@ -27,5 +27,23 @@ shared_examples_for 'empty input impl' do
     end
   end
 
+  describe '#close' do
+    it "should do nothing by default" do
+      class << @io = mock!
+        include IOable::ByteInputtable
+      end
+      @io.close
+    end
+  end
+
+  describe '#close_read' do
+    it "should do nothing by default" do
+      class << @io = mock!
+        include IOable::ByteInputtable
+      end
+      @io.close_read
+    end
+  end
+
 end
 
