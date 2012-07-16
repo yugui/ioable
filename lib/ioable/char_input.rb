@@ -1,10 +1,18 @@
 #-*- encoding: US-ASCII -*-
-module IOable; end
-class IOable::BufferredInput
+require 'forwardable'
+require 'ioable/byte_inputtable'
+
+class IOable::CharInput
+  include IOable::ByteInputtable
+  extend Forwardable
+
   SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
+
   def initialize(byte_input,
                  external = Encoding::default_external, internal = nil,
                  opt = nil)
+    @pos = 0
+    @lineno = 1
     @byte_input = byte_input
     @buf = "".force_encoding(Encoding::ASCII_8BIT)
     @buf.instance_eval do
@@ -13,7 +21,10 @@ class IOable::BufferredInput
       end
     end
     return unless SUPPORT_ENCODING
+    initialize_encodings(external, internal, opt)
+  end
 
+  def initialize_encodings(external, internal = nil, opt = {})
     @external_encoding =
       external.kind_of?(Encoding) ? external : Encoding.find(external)
     @internal_encoding =
@@ -21,18 +32,10 @@ class IOable::BufferredInput
     @opt = opt
   end
   private :initialize_encodings
+
   attr_reader :external_encoding, :internal_encoding
-
-  def initialize_inputtable
-    @pos = 0
-    @lineno = 1
-  end
-  private :initialize_inputtable
-  attr_accessor :pos, :lineno
-
-  def lineno=(value)
-    seek(value, IO::SEEK_SET)
-  end
+  attr_accessor :lineno
+  def_delegators :@byte_input, :sysread, :sysseek
 
   def set_encoding(*args)
     unless (1..3).include? args.size
@@ -55,7 +58,6 @@ class IOable::BufferredInput
   end
 
   [
-    %w[ byte byte ],
     %w[ char c ],
     %w[ line s ]
   ].each do |unit, get_suffix|
@@ -67,7 +69,7 @@ class IOable::BufferredInput
         end
       end
       alias #{unit}s each_#{unit}
-  
+
       def read#{unit}
         value = get{get_suffix}
         if value.nil?
@@ -76,33 +78,63 @@ class IOable::BufferredInput
           raise EOFError, "end of file reached"
         end
       end
-    EOF
+      EOF
   end
 
   def getbyte
-    fillbuf if @buf.empty?
-    return @buf.shift
+    if @buf.empty?
+      return nil if @byte_input.eof?
+      fillbuf 
+    end
+    b = @buf.shift.ord
+    @pos += 1
+    return b
+  end
+
+  def ungetbyte(b)
+    case b
+    when Integer
+      raise TypeError, "must be in 0...256, but got #{b}" unless (0...256).include?(b)
+      @buf[0...0] = b.chr
+
+    when String
+      @buf[0...0] = b.chr
+
+    else
+      raise TypeError, "expected a byte or a string, but got #{b.class}"
+    end
   end
 
   MAX_ASCII_BYTE = 127
   MAX_BYTES_FOR_CHAR = 5
   def getc
-    fillbuf if @buf.empty?
+    if @buf.empty?
+      return nil if @byte_input.eof?
+      fillbuf
+    end
+
     if @external_encoding.ascii_compatible? and @buf[0].ord < MAX_ASCII_BYTE
       char = @buf.shift.force_encoding(@external_encoding)
     else
       (1..MAX_BYTES_FOR_CHAR).each do |length|
         if @buf.length < length
-          fillbuf
-          redo
+          if @byte_input.eof?
+            break
+          else
+            fillbuf
+            redo
+          end
         else
-          c = @buf[0, length].dup.force_encoding(@external_encoding)
+          c = @buf[0, length].force_encoding(@external_encoding)
           if c.valid_encoding?
             char = c
+            @buf[0, length] = ""
             break
           end
         end
       end
+
+      char = @buf.shift.force_encoding(@external_encoding) if char.nil?
     end
     unless internal_encoding.nil? or external_encoding == internal_encoding
       char.encode!(internal_encoding)
@@ -121,10 +153,26 @@ class IOable::BufferredInput
     return line
   end
 
+  def read
+    result = @buf.dup
+    until @byte_input.eof?
+      fillbuf
+      result << @buf
+      @buf.clear
+    end
+    result.force_encoding(@external_encoding)
+    if @internal_encoding and @internal_encoding != @external_encoding
+      result.encode!(@internal_encoding)
+    end
+    return result
+  end
+
   private
   INPUTTABLE_BUF_READ_SIZE = 256
   def fillbuf
-    @buf << sysread(INPUTTABLE_BUF_READ_SIZE)
+    @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE)
+  rescue Errno::EAGAIN
+    retry
   end
 end
 
