@@ -154,12 +154,10 @@ class IOable::CharInput
   end
 
   def read(length = nil, outbuf = "")
-    if @buf.empty? and @byte_input.eof?
-      return length == 0 ? outbuf.replace("".force_encoding(Encoding::ASCII_8BIT)) : nil
-    end
-
-    if length.nil?
+    case
+    when length.nil?
       outbuf.replace(@buf)
+      return nil if @buf.empty? and @byte_input.eof?
       @buf.clear
       begin
         until @byte_input.eof?
@@ -178,8 +176,19 @@ class IOable::CharInput
         outbuf.encode!(@internal_encoding)
       end
       return outbuf
-    else
-      outbuf.replace("".force_encoding(Encoding::ASCII_8BIT))
+
+    when length == 0
+      return outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
+
+    when length < 0
+      raise ArgumentError, "the given length is negative"
+
+    when length.kind_of?(Integer) ||
+      (length.repond_to?(:to_int) and (length = length.to_int).kind_of?(Integer))
+
+      outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
+      return nil if @buf.empty? and @byte_input.eof?
+
       begin
         loop do
           new_chunk = @buf[0...length]

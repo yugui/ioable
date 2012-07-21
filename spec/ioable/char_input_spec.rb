@@ -317,6 +317,15 @@ describe IOable::CharInput do
         returned.should be_equal(buf)
         buf.should == "abcdefg\nhijkあlmnopqr\n"
       end
+
+      it "should make the second argument empty but return nil if eof" do
+        @io.read
+
+        buf = "something different"
+        returned = @io.read(nil, buf)
+        returned.should be_nil
+        buf.should be_empty
+      end
     end
 
     describe "on a length given as an argument" do
@@ -369,6 +378,19 @@ describe IOable::CharInput do
         returned = @io.read(0, buf)
         returned.should be_equal(buf)
         buf.should == ""
+      end
+
+      it "should make the second argument empty if it is given but eof" do
+        @io.read
+
+        buf = "something different"
+        returned = @io.read(3, buf)
+        returned.should be_nil
+        buf.should be_empty
+      end
+
+      it "should raise ArgumentError if the length is negative" do
+        lambda { @io.read(-1) }.should raise_error(ArgumentError)
       end
     end
   end
