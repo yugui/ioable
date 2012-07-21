@@ -2,12 +2,20 @@
 require 'forwardable'
 require 'ioable/byte_inputtable'
 
+# A wrapper class to provides a full input functionalities based on the wrapped
+# byte stream.
 class IOable::CharInput
   include IOable::ByteInputtable
   extend Forwardable
 
   SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
 
+  # byte_input::
+  #    The byte stream to wrap.
+  #    It must provide _#sysread_, _#sysseek_ and _#eof?_.
+  # external:: External encoding of this input. Ignored if the Ruby is a 1.8.x.
+  # internal:: Internal encoding of this input. Ignored if the Ruby is a 1.8.x.
+  # opt:: Character conversion options for this input. Ignored if the Ruby is a 1.8.x.
   def initialize(byte_input,
                  external = Encoding::default_external, internal = nil,
                  opt = nil)
