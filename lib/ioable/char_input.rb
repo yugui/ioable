@@ -20,7 +20,7 @@ class IOable::CharInput
                  external = Encoding::default_external, internal = nil,
                  opt = nil)
     @pos = 0
-    @lineno = 1
+    @lineno = 0
     @byte_input = byte_input
     @buf = "".force_encoding(Encoding::ASCII_8BIT)
     @buf.instance_eval do
@@ -111,6 +111,8 @@ class IOable::CharInput
     else
       raise TypeError, "expected a byte or a string, but got #{b.class}"
     end
+
+    @pos -= 1
   end
 
   MAX_ASCII_BYTE = 127
@@ -144,20 +146,63 @@ class IOable::CharInput
 
       char = @buf.shift.force_encoding(@external_encoding) if char.nil?
     end
+    @pos += char.bytesize
     unless internal_encoding.nil? or external_encoding == internal_encoding
       char.encode!(internal_encoding)
     end
     return char
   end
 
-  def gets
-    start_offset = 0
-    until index = @buf.index($/, start_offset)
-      start_offset = @buf.length
-      fillbuf
+  def gets(*args)
+    case args.length
+    when 0
+      rs, limit = $/, nil
+    when 1
+      rs, limit = $/, nil
+      case
+      when args[0].kind_of?(String)
+        rs = args[0]
+      when args[0].kind_of?(Integer)
+        limit = args[0]
+      when args[0].respond_to?(:to_str)
+        rs = args[0].to_str
+        raise TypeError, "#{args[0]}.to_str did not return an String" unless limit.kind_of?(String)
+      when args[0].respond_to?(:to_int)
+        limit = args[0].to_int
+        raise TypeError, "#{args[0]}.to_int did not return an Integer" unless limit.kind_of?(Integer)
+      end
+    when 2
+      rs, limit = *args
+    else
+      raise ArgumentError, "wrong number of arguments #{args.size} for 0..2"
     end
-    line = @buf[0..index]
-    @buf[0..index] = ""
+
+    return nil if @buf.empty? and @byte_input.eof?
+    if rs.nil?
+      line = read(limit)
+    else
+      rs = rs.empty? ? "\n\n" : rs
+      start_index = 0
+      until index = @buf.index(rs, start_index)
+        if @byte_input.eof?
+          index = @buf.length
+          break
+        end
+        start_index = [@buf.length - rs.length + 1, 0].max
+        fillbuf
+      end
+      end_index = index + rs.length
+      line = @buf[0...end_index]
+      @buf[0...end_index] = ""
+    end
+
+    line.force_encoding(@external_encoding)
+    unless @internal_encoding.nil? or @internal_encoding == @external_encoding
+      line.encode!(@internal_encoding)
+    end
+
+    @lineno += 1
+    $. = @lineno
     return line
   end
 
