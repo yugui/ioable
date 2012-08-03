@@ -1,68 +1,9 @@
 #-*- encoding: US-ASCII -*-
 require 'enumerator'
 require 'ioable/convert_helper'
+require 'ioable/common_ioable'
 
 module IOable; end
-
-module IOable::CommonIOable
-  # Always returns false. The subclass overrides this if necessary.
-  def auto_close?
-    false
-  end
-
-  # Ignores the given value. The subcless overrides this if necessary.
-  def auto_close=(value)
-    # Do nothing.
-  end
-
-  # Always returns false. The subclass overrides this if necessary.
-  def close_on_exec?
-    false
-  end
-
-  # Ignores the given value. The subcless overrides this if necessary.
-  def close_on_exec=(value)
-    # Do nothing.
-  end
-
-  # Does nothing by default. The subclass overrides this if necessary.
-  def close
-    # Do nothing.
-  end
-
-  # Always returns false. The subclass overrides this if necessary.
-  def closed?
-    return false
-  end
-
-  def eof
-    eof?
-  end
-
-  def fcntl(cmd, arg = 0)
-    raise NotimplementedError
-  end
-  def ioctl(cmd, arg = 0)
-    raise NotimplementedError
-  end
-  def isatty; false end
-  alias tty? isatty
-  def pid; nil end
-  def fileno; nil end
-
-  def fdatasync; nil end
-  def fsync; nil end
-  def sync; nil end
-  def sync=(value); end
-
-  def reopen(*args)
-    raise NotimplementedError
-  end
-
-  def to_io
-    self
-  end
-end
 
 module IOable::CommonInputtable
   include IOable::CommonIOable
@@ -74,6 +15,7 @@ end
 # * sysseek
 # * sysread
 # * eof?
+# Optionally it would be better to override #nread according to your #sysread implementation.
 module IOable::ByteInputtable
   include IOable::CommonInputtable
 
@@ -109,7 +51,7 @@ module IOable::ByteInputtable
       @pos += 1
       return b
     end
-  rescue Errno::EAGAIN
+  rescue Errno::EAGAIN, Errno::EINTR
     retry
   end
 
@@ -138,5 +80,9 @@ module IOable::ByteInputtable
     else
       raise TypeError, "expected a byte or a string, but got #{b.class}"
     end
+  end
+
+  def nread
+    return @buf.nil? ? 0 : 1
   end
 end

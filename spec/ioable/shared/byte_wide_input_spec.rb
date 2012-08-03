@@ -238,5 +238,18 @@ shared_examples_for 'byte-wide input' do
       @io.to_io.should be_equal(@io)
     end
   end
+
+  describe "readpartial"
+  describe "readnonblock"
+  describe "nread" do
+    it "should return 0 at first" do
+      @io.nread.should == 0
+    end
+
+    it "should return 1 if called #ungetbyte" do
+      @io.ungetbyte(32)
+      @io.nread.should == 1
+    end
+  end
 end
 
