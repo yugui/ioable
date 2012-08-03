@@ -204,6 +204,14 @@ shared_examples_for 'byte-wide input' do
       @io.seek(10).should == 0
       @io.seek(10).should == 0
     end
+
+    it "should accept an object responding to #to_int" do
+      len = Object.new
+      stub(len).to_int { 1 }
+      mock(@io).sysseek(1, IO::SEEK_SET)
+
+      @io.seek(len)
+    end
   end
 
   describe '#rewind' do

@@ -1,5 +1,6 @@
 #-*- encoding: US-ASCII -*-
 require 'enumerator'
+require 'ioable/convert_helper'
 
 module IOable; end
 
@@ -87,6 +88,7 @@ module IOable::ByteInputtable
   end
 
   def seek(offset, whence = IO::SEEK_SET)
+    offset = ConvertHelper.try_convert(offset, Integer, :to_int)
     @pos = sysseek(offset, whence)
     return 0
   end
