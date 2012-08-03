@@ -644,6 +644,8 @@ describe IOable::CharInput do
         @io.gets.should == "defgh\ni\n\n"
         @io.gets.should == "jk"
       end
+      it "should return at most the specified number of bytes if limit is specified"
+      it "should not break a multibyte character at the specified limit"
     end
 
     it "should read at most the specified bytes" do
