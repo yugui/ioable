@@ -123,6 +123,8 @@ describe IOable::CharInput do
       @io.seek(10).should == 0
       @io.seek(10).should == 0
     end
+
+    it "should accept an object responding to #to_int"
   end
 
   describe '#rewind' do
@@ -422,6 +424,8 @@ describe IOable::CharInput do
       it "should raise ArgumentError if the length is negative" do
         lambda { @io.read(-1) }.should raise_error(ArgumentError)
       end
+
+      it "should accept an object responding to #to_int"
     end
   end
 
@@ -439,98 +443,226 @@ describe IOable::CharInput do
 
       @orig_separator = $/
     end
+
     after do
       $/ = @orig_separator
     end
 
-    it "should return a line" do
-      @data = [ binary("abcde"), binary("fg\nhi") ]
+    describe "on separator not specified" do
+      it "should return a line" do
+        @data = [ binary("abcde"), binary("fg\nhi") ]
 
-      @io.gets.should == "abcdefg\n"
+        @io.gets.should == "abcdefg\n"
+      end
+
+      it "should return a line in the external encoding if the internal encoding is nil" do
+        @data = [ binary("abcde"), binary("fg\nhi") ]
+
+        @io.gets.encoding.should == Encoding::UTF_8
+      end
+
+      it "can return a broken charater" do
+        @data = [ binary("a\xFF\xFF\nc"), binary("d") ]
+
+        @io.gets.should == "a\xFF\xFF\n"
+      end
+
+      it "should return a line in the internal encoding if the internal encoding is not nil" do
+        @io.set_encoding(Encoding::UTF_8, Encoding::ISO_2022_JP)
+        @data = [ binary("abcdeあ"), binary("fg\nhi") ]
+
+        line = @io.gets
+        line.should == "abcdeあfg\n".encode(Encoding::ISO_2022_JP)
+        line.encoding.should == Encoding::ISO_2022_JP
+      end
+
+      it "should advance #lineno" do
+        @data = [ binary("abcde"), binary("fg\nhi") ]
+
+        @io.gets
+        @io.lineno.should == 1
+
+        @io.gets
+        @io.lineno.should == 2
+      end
+
+      it "should set $. to #lineno" do
+        @data = [ binary("abcdeあ"), binary("fg\nhi") ]
+
+        @io.gets
+        $..should == 1
+
+        $. = 1000
+
+        @io.gets
+        $..should == 2
+      end
+
+      it "should return nil if eof" do
+        @io.gets.should be_nil
+      end
+
+      it "should advance #pos by the length of the read bytes" do
+        @data = [ binary("abあ"), binary("d\nef") ]
+
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+        p @io.gets
+        @io.pos.should == 7
+        @io.gets
+        @io.pos.should == 9
+      end
+
+      it "should advance #lineno by 1" do
+        @data = [ binary("abc"), binary("d\nef") ]
+
+        @io.gets
+        @io.lineno.should == 1
+        @io.gets
+        @io.lineno.should == 2
+      end
     end
 
-    it "should return a line in the external encoding if the internal encoding is nil" do
-      @data = [ binary("abcde"), binary("fg\nhi") ]
+    describe "with an alternative line separator" do
+      it "should read the separator from $/ if not specified in argumetns" do
+        @data = [ binary("a"), binary("baba"), binary("abbaba"), binary("bab/ba/bab") ]
+        $/ = 'ab'
 
-      @io.gets.encoding.should == Encoding::UTF_8
+        @io.gets.should == "ab"
+        @io.gets.should == "ab"
+        @io.gets.should == "aab"
+        @io.gets.should == "bab"
+        @io.gets.should == "ab"
+        @io.gets.should == "ab"
+        @io.gets.should == "/ba/bab"
+      end
+
+      it "should use the argument as the separator if specified" do
+        @data = [ binary("a"), binary("baba"), binary("abbaba"), binary("bab/ba/bab") ]
+
+        @io.gets("ab").should == "ab"
+        @io.gets("ab").should == "ab"
+        @io.gets("ab").should == "aab"
+        @io.gets("ab").should == "bab"
+        @io.gets("ab").should == "ab"
+        @io.gets("ab").should == "ab"
+        @io.gets("ab").should == "/ba/bab"
+      end
+
+      it "should accept multibyte characters as a separator" do
+        @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
+
+        @io.gets("あ").should == "abあ"
+        @io.gets("あ").should == "いcあ"
+        @io.gets("あ").should == "d"
+      end
+
+      it "should accept multibyte separator in the internal encoding if internal encoding is not nil" do
+        @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::ISO_2022_JP)
+
+        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "abあ".encode(Encodig::ISO_2022_JP)
+        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "いcあ".encode(Encodig::ISO_2022_JP)
+      end
+
+      it "should raise an ArgumentError if the encoding of the separator does not match to the IO's" do
+        @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
+        @io.set_encoding(Encoding::UTF_8)
+        lambda { @io.gets("\xE3\x81\x82".force_encoding(Encoding::CP932)) }.should \
+          raise_error(ArgumentError, /encoding mismatch/)
+
+        @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+        lambda { @io.gets("あ") }.should raise_error(ArgumentError, /encoding mismatch/)
+      end
+
+      it "should return nil if eof" do
+        @io.gets("あ").should == nil
+      end
+
+      it "should advance #pos by the length of the read bytes" do
+        @data = [ binary("abあ"), binary("d\nef") ]
+
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+        @io.gets("あ")
+        @io.pos.should == 5
+        @io.gets("あ")
+        @io.pos.should == 10
+      end
+
+      it "should advance #lineno by 1" do
+        @data = [ binary("abあ"), binary("d\nef") ]
+
+        @io.gets("あ")
+        @io.lineno.should == 1
+        @io.gets("あ")
+        @io.lineno.should == 2
+      end
     end
 
-    it "should return a line in the internal encoding if the internal encoding is not nil" do
-      @io.set_encoding(Encoding::UTF_8, Encoding::ISO_2022_JP)
-      @data = [ binary("abcdeあ"), binary("fg\nhi") ]
+    describe "on binary reading mode" do
+      it "should return the whole of file if $/ is nil" do
+        @data = [ binary("abcd"), binary("efgh\ni"), binary("jk") ]
+        $/ = nil
+        line = @io.gets
+        line.should == "abcdefgh\nijk"
+      end
 
-      line = @io.gets
-      line.should == "abcdeあfg\n".encode(Encoding::ISO_2022_JP)
-      line.encoding.should == Encoding::ISO_2022_JP
+      it "should return the whole of file if the specified separator is nil" do
+        @data = [ binary("abcd"), binary("efgh\ni"), binary("jk") ]
+        line = @io.gets(nil)
+        line.should == "abcdefgh\nijk"
+      end
+
+      it "should return a string in the external encoding if the internal encoding is nil" do
+        @data = [ binary("abcd"), binary("efgh\ni"), binary("jk") ]
+        line = @io.gets(nil)
+        line.encoding.should == Encoding::UTF_8
+      end
+
+      it "should convert the returned string to the internal encoding if it is not nil" do
+        @data = [ binary("abcd"), binary("eあfgh\ni"), binary("jk") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+
+        line = @io.gets(nil)
+        line.should == "abcdeあfgh\nijk".encode(Encoding::CP932)
+      end
+
+      it "should return nil if eof" do
+        @io.gets(nil).should == nil
+      end
     end
 
-    it "should advance #lineno" do
-      @data = [ binary("abcde"), binary("fg\nhi") ]
+    describe "on paragraph mode" do
+      it "should use empty lines as the separator if $/ is an empty string" do
+        @data = [ binary("abc\n\nd"), binary("efgh\ni\n"), binary("\njk") ]
+        $/ = ""
 
-      @io.gets
-      @io.lineno.should == 1
-
-      @io.gets
-      @io.lineno.should == 2
-    end
-
-    it "should set $. to #lineno" do
-      @data = [ binary("abcdeあ"), binary("fg\nhi") ]
-
-      @io.gets
-      $..should == 1
-
-      $. = 1000
-
-      @io.gets
-      $..should == 2
-    end
-
-    it "should recognize an alternative line separator if $/ is set" do
-      @data = [ binary("a"), binary("baba"), binary("abbaba"), binary("bab/ba/bab") ]
-      $/ = 'ab'
-
-      @io.gets.should == "ab"
-      @io.gets.should == "ab"
-      @io.gets.should == "aab"
-      @io.gets.should == "bab"
-      @io.gets.should == "ab"
-      @io.gets.should == "ab"
-      @io.gets.should == "/ba/bab"
-    end
-
-    it "should return the whole of file if $/ is nil" do
-      @data = [ binary("abcd"), binary("efgh\ni"), binary("jk") ]
-      $/ = nil
-      line = @io.gets
-      line.should == "abcdefgh\nijk"
-      line.encoding.should == Encoding::UTF_8
-    end
-
-    it "should use empty lines as the separator if $/ is an empty string" do
-      @data = [ binary("abc\n\nd"), binary("efgh\ni\n"), binary("\njk") ]
-      $/ = ""
-
-      @io.gets.should == "abc\n\n"
-      @io.gets.should == "defgh\ni\n\n"
-      @io.gets.should == "jk"
-    end
-
-    it "should return nil if eof" do
-      @io.gets.should be_nil
+        @io.gets.should == "abc\n\n"
+        @io.gets.should == "defgh\ni\n\n"
+        @io.gets.should == "jk"
+      end
     end
 
     it "should read at most the specified bytes" do
       @data = [ binary("abc\nd"), binary("efgh\ni"), binary("\njk") ]
       @io.gets(2).should == "ab"
-
-      @io.gets(nil, 3).should == "c\nd"
+      @io.gets(3).should == "c\n"
+      @io.gets(nil, 9).should == "defgh\ni\nj"
     end
 
     it "should not break a character to fit to limit" do
-      @data = [ binary("あ") ]
+      @data = [ binary("あabc") ]
 
       @io.gets(2).should == "あ"
+    end
+
+    it "should return an empty string when limit == 0 even if eof"
+
+    it "should count the specified bytes in the external encoding" do
+      @data = [ binary("abc"), binary("あいう".encode(Encoding::CP932)), binary("abc") ]
+      @io.set_encoding(Encoding::CP932, Encoding::UTF_8)
+
+      @io.gets(6).should == "abcあい"
     end
 
     it "should not recognize a part of char as a separator" do
@@ -547,14 +679,12 @@ describe IOable::CharInput do
         "\x81\x82\x82\x82".force_encoding(Encoding::CP932)
     end
 
-    it "should advance #pos by the length of the read bytes" do
-      @data = [ binary("abあ"), binary("d\nef") ]
-
-      @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
-      @io.gets
-      @io.pos
-    end
+    it "should accept an object responding to #to_int as a limit"
   end
 
-  describe "#ungetc"
+  describe "#ungetc" do
+    it "should accept a byte" #do
+      #@io.ungetc("a")
+    #end
+  end
 end

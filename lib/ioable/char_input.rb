@@ -118,37 +118,11 @@ class IOable::CharInput
   MAX_ASCII_BYTE = 127
   MAX_BYTES_FOR_CHAR = 5
   def getc
-    if @buf.empty?
-      return nil if @byte_input.eof?
-      fillbuf
-    end
-
-    if @external_encoding.ascii_compatible? and @buf[0].ord < MAX_ASCII_BYTE
-      char = @buf.shift.force_encoding(@external_encoding)
-    else
-      (1..MAX_BYTES_FOR_CHAR).each do |length|
-        if @buf.length < length
-          if @byte_input.eof?
-            break
-          else
-            fillbuf
-            redo
-          end
-        else
-          c = @buf[0, length].force_encoding(@external_encoding)
-          if c.valid_encoding?
-            char = c
-            @buf[0, length] = ""
-            break
-          end
-        end
+    if char = getc_raw
+      @pos += char.bytesize
+      unless internal_encoding.nil? or external_encoding == internal_encoding
+        char.encode!(internal_encoding)
       end
-
-      char = @buf.shift.force_encoding(@external_encoding) if char.nil?
-    end
-    @pos += char.bytesize
-    unless internal_encoding.nil? or external_encoding == internal_encoding
-      char.encode!(internal_encoding)
     end
     return char
   end
@@ -177,25 +151,40 @@ class IOable::CharInput
       raise ArgumentError, "wrong number of arguments #{args.size} for 0..2"
     end
 
+    io_enc = @internal_encoding || @external_encoding
+
+    unless rs.nil? or rs.encoding == io_enc or 
+      (rs.ascii_only? and (rs.empty? or io_enc.ascii_compatible?)) then
+      if rs == "\n"
+        rs = "\n".encode(io_enc)
+      else
+        raise ArgumentError, "encoding mismatch: #{io_enc.name} IO with #{rs.encoding.name} RS"
+      end
+    end
+
     return nil if @buf.empty? and @byte_input.eof?
     if rs.nil?
       line = read(limit)
+    elsif limit
+      line = naive_gets_raw(rs, limit)
     else
-      rs = rs.empty? ? "\n\n" : rs
-      start_index = 0
-      until index = @buf.index(rs, start_index)
-        if @byte_input.eof?
-          index = @buf.length
-          break
-        end
-        start_index = [@buf.length - rs.length + 1, 0].max
-        fillbuf
-      end
-      end_index = index + rs.length
-      line = @buf[0...end_index]
-      @buf[0...end_index] = ""
+       rs = rs.empty? ? "\n\n" : rs
+      line = naive_gets_raw(rs, Float::INFINITY)
+#       start_index = 0
+#       until index = @buf.dup.force_encoding(@external_encoding).index(rs, start_index)
+#         if @byte_input.eof?
+#           index = @buf.dup.force_encoding(@external_encoding).length
+#           break
+#         end
+#         start_index = [@buf.length - rs.bytesize + 1, 0].max
+#         fillbuf
+#       end
+#       end_index = index + rs.length
+#       line = @buf.dup.force_encoding(@external_encoding)[0...end_index]
+#       @buf[0...line.bytesize] = ""
     end
 
+    @pos += line.bytesize
     line.force_encoding(@external_encoding)
     unless @internal_encoding.nil? or @internal_encoding == @external_encoding
       line.encode!(@internal_encoding)
@@ -261,12 +250,62 @@ class IOable::CharInput
   end
 
   private
+
   INPUTTABLE_BUF_READ_SIZE = 256
   def fillbuf
     raise unless @buf.encoding == Encoding::ASCII_8BIT
     @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE).force_encoding(Encoding::ASCII_8BIT)
+    nil
   rescue Errno::EAGAIN
     retry
+  end
+
+  # Similar to getc but:
+  # * Does not convert the result to the internal string even if necessary.
+  # * Does not advance #pos
+  def getc_raw
+    if @buf.empty?
+      return nil if @byte_input.eof?
+      fillbuf
+    end
+
+    if @external_encoding.ascii_compatible? and @buf[0].ord < MAX_ASCII_BYTE
+      char = @buf.shift.force_encoding(@external_encoding)
+    else
+      (1..MAX_BYTES_FOR_CHAR).each do |length|
+        if @buf.length < length
+          if @byte_input.eof?
+            break
+          else
+            fillbuf
+            redo
+          end
+        else
+          c = @buf[0, length].force_encoding(@external_encoding)
+          if c.valid_encoding?
+            char = c
+            @buf[0, length] = ""
+            break
+          end
+        end
+      end
+
+      char = @buf.shift.force_encoding(@external_encoding) if char.nil?
+    end
+    return char
+  end
+
+  # Similar to gets but:
+  # * Does not convert the result to the internal string even if necessary.
+  # * Does not advance #pos
+  # * The algorithm is not efficient
+  def naive_gets_raw(rs, limit)
+    line = "".force_encoding(@external_encoding)
+    while line.bytesize < limit and c = getc_raw
+      line << c
+      break if line.end_with?(rs)
+    end
+    return line
   end
 end
 
