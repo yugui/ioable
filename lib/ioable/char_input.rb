@@ -132,7 +132,7 @@ class IOable::CharInput
     when 1
       rs, limit = $/, nil
       case
-      when args[0].kind_of?(String)
+      when args[0].kind_of?(String), args[0].nil?
         rs = args[0]
       when args[0].kind_of?(Integer)
         limit = args[0]
