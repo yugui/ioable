@@ -120,9 +120,7 @@ class IOable::CharInput
   def getc
     if char = getc_raw
       @pos += char.bytesize
-      unless internal_encoding.nil? or external_encoding == internal_encoding
-        char.encode!(internal_encoding)
-      end
+      char = to_internal(char)
     end
     return char
   end
@@ -186,9 +184,7 @@ class IOable::CharInput
 
     @pos += line.bytesize
     line.force_encoding(@external_encoding)
-    unless @internal_encoding.nil? or @internal_encoding == @external_encoding
-      line.encode!(@internal_encoding)
-    end
+    line = to_internal(line)
 
     @lineno += 1
     $. = @lineno
@@ -303,9 +299,19 @@ class IOable::CharInput
     line = "".force_encoding(@external_encoding)
     while line.bytesize < limit and c = getc_raw
       line << c
-      break if line.end_with?(rs)
+      break if to_internal(line).end_with?(rs)
     end
     return line
+  end
+
+  # Precondition: str.encoding must be in @external_encoding
+  def to_internal(str)
+    raise ArgumentError if str.encoding != @external_encoding
+    if @internal_encoding.nil? or @internal_encoding == @external_encoding
+      str
+    else
+      str.encode(@internal_encoding)
+    end
   end
 end
 
