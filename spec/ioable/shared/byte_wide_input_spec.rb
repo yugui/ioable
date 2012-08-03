@@ -56,9 +56,13 @@ shared_examples_for 'byte-wide input' do
 
     it "should make the next call of #getbyte return the given byte" do
       @io.ungetbyte(1)
+      dont_allow(@io).eof?
+      dont_allow(@io).sysread.with_any_args
       @io.getbyte.should == 1
 
       @io.ungetbyte("a")
+      dont_allow(@io).eof?
+      dont_allow(@io).sysread.with_any_args
       @io.getbyte.should == ?a.ord
     end
   end
@@ -111,7 +115,7 @@ shared_examples_for 'byte-wide input' do
       mock(@io).eof?{ true }
     end
 
-    it "should read a string via sysread and yield it until eof" do
+    it "should read a string from #sysread and yield it until eof" do
       bytes = []
       @io.each_byte do |b|
         bytes << b
@@ -239,7 +243,44 @@ shared_examples_for 'byte-wide input' do
     end
   end
 
-  describe "readpartial"
+  describe "readpartial" do
+    it "should return the buffered content if available" do
+      @io.ungetbyte(1)
+      dont_allow(@io).eof?
+      @io.readpartial(100).should == binary("\x1")
+    end
+
+    it "replaces the given buffer if given" do
+      @io.ungetbyte(1)
+
+      buf = "abcde"
+      @io.readpartial(100, buf).should be_equal(buf)
+      buf.should == binary("\x1")
+    end
+
+    it "calls #sysread if the buffer is empty" do
+      stub(@io).eof? { false }
+      mock(@io).sysread(100, is_a(String)) { binary("abcde") }
+
+      @io.readpartial(100).should == binary("abcde")
+    end
+
+    it "retries #sysread if EINTR" do
+      stub(@io).eof? { false }
+      mock(@io).sysread(100, is_a(String)) { raise Errno::EINTR }
+      mock(@io).sysread(100, is_a(String)) { binary("abcde") }
+
+      @io.readpartial(100).should == binary("abcde")
+    end
+
+    it "raises EOFError if eof" do
+      stub(@io).eof? { true }
+      dont_allow(@io).sysread.with_any_args
+
+      lambda { @io.readpartial(100) }.should raise_error(EOFError)
+    end
+  end
+
   describe "readnonblock"
   describe "nread" do
     it "should return 0 at first" do

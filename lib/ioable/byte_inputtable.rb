@@ -51,7 +51,7 @@ module IOable::ByteInputtable
       @pos += 1
       return b
     end
-  rescue Errno::EAGAIN, Errno::EINTR
+  rescue Errno::EINTR, Errno::EWOULDBLOCK, Errno::EAGAIN
     retry
   end
 
@@ -84,5 +84,18 @@ module IOable::ByteInputtable
 
   def nread
     return @buf.nil? ? 0 : 1
+  end
+
+  def readpartial(maxlen, outbuf = nil)
+    outbuf ||= ""
+    if !@buf.nil?
+      return outbuf.replace(@buf.chr.force_encoding(Encoding::ASCII_8BIT))
+    elsif eof?
+      raise EOFError, "end of file reached"
+    else
+      return sysread(maxlen, outbuf)
+    end
+  rescue Errno::EINTR, Errno::EWOULDBLOCK, Errno::EAGAIN
+    retry
   end
 end
