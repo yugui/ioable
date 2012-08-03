@@ -560,8 +560,8 @@ describe IOable::CharInput do
         @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
         @io.set_encoding(Encoding::UTF_8, Encoding::ISO_2022_JP)
 
-        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "abあ".encode(Encodig::ISO_2022_JP)
-        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "いcあ".encode(Encodig::ISO_2022_JP)
+        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "abあ".encode(Encoding::ISO_2022_JP)
+        @io.gets("あ".encode(Encoding::ISO_2022_JP)).should == "いcあ".encode(Encoding::ISO_2022_JP)
       end
 
       it "should raise an ArgumentError if the encoding of the separator does not match to the IO's" do
@@ -575,6 +575,12 @@ describe IOable::CharInput do
         lambda { @io.gets("あ") }.should raise_error(ArgumentError, /encoding mismatch/)
       end
 
+      it "should not raise an ArgumentError for ascii RS even if the encoding of the separator does not match to the IO's" do
+        @data = [ binary("a"), binary("bあいc\xE3"), binary("\x81\x82d") ]
+        @io.set_encoding(Encoding::UTF_8)
+        lambda { @io.gets("c".force_encoding(Encoding::CP932)) }.should_not raise_error
+      end
+
       it "should return nil if eof" do
         @io.gets("あ").should == nil
       end
@@ -583,10 +589,10 @@ describe IOable::CharInput do
         @data = [ binary("abあ"), binary("d\nef") ]
 
         @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
-        @io.gets("あ")
+        @io.gets("あ".encode(Encoding::CP932))
         @io.pos.should == 5
-        @io.gets("あ")
-        @io.pos.should == 10
+        @io.gets("あ".encode(Encoding::CP932))
+        @io.pos.should == 9
       end
 
       it "should advance #lineno by 1" do
