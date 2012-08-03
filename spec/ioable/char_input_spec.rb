@@ -687,4 +687,9 @@ describe IOable::CharInput do
       #@io.ungetc("a")
     #end
   end
+
+  describe "#readpartial"
+  describe "#sysread"
+  describe "#nread"
+  describe "#read_nonblock"
 end
