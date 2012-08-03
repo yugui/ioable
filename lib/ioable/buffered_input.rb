@@ -36,12 +36,18 @@ class IOable::BufferedInput
     initialize_encodings(external, internal, opt)
   end
 
-  def initialize_encodings(external, internal = nil, opt = {})
+  def initialize_encodings(external, internal = nil, opt = nil)
     @external_encoding =
       external.kind_of?(Encoding) ? external : Encoding.find(external)
     @internal_encoding =
       (internal.nil? || internal.kind_of?(Encoding)) ? internal : Encoding.find(internal)
-    @opt = opt
+    @opt = opt || {}
+    @convert_options = @opt.select{|key, value|
+      [
+        :invalid, :undef, :replace, :fallback, :xml, 
+        :cr_newline, :crlf_newline, :universal_newline
+      ].include?(key)
+    }
   end
   private :initialize_encodings
 
@@ -135,6 +141,7 @@ class IOable::BufferedInput
   end
 
   MAX_ASCII_BYTE = 127
+  # The maximum # of bytes per character in the encoding Ruby supports
   MAX_BYTES_FOR_CHAR = 5
   def getc
     if char = getc_raw
@@ -184,8 +191,7 @@ class IOable::BufferedInput
       if limit.nil?
         return read
       else
-        line = "".force_encoding(Encoding::ASCII_8BIT)
-        line = read_length_bytes(limit, line)
+        line = read_chars_limited_length(limit)
       end
     else
       rs = rs.empty? ? "\n\n" : rs
@@ -306,12 +312,12 @@ class IOable::BufferedInput
   end
 
   # Precondition: str.encoding must be in @external_encoding
-  def to_internal(str)
+  def to_internal(str, opt = {})
     raise ArgumentError if str.encoding != @external_encoding
     if @internal_encoding.nil? or @internal_encoding == @external_encoding
       str
     else
-      str.encode(@internal_encoding)
+      str.encode(@internal_encoding, @convert_options.merge(opt))
     end
   end
 
@@ -333,6 +339,7 @@ class IOable::BufferedInput
     outbuf.force_encoding(@external_encoding)
   end
 
+  # Read bytes at most the specified length.
   def read_length_bytes(length, outbuf)
     loop do
       new_chunk = @buf[0...length]
@@ -346,6 +353,23 @@ class IOable::BufferedInput
   rescue Object
     @buf[0...0] = outbuf
     raise
+  end
+
+  # @return encoded in @external_encoding
+  def read_chars_limited_length(limit)
+    line = "".force_encoding(Encoding::ASCII_8BIT)
+    line = read_length_bytes(limit, line)
+
+    MAX_BYTES_FOR_CHAR.times do
+      line_ext = line.dup.force_encoding(@external_encoding)
+      break if line_ext[-1].valid_encoding?
+
+      # tries to fix the broken character by reading more.
+      b = getbyte
+      break unless b
+      line << b
+    end
+    line.force_encoding(@external_encoding)
   end
 end
 

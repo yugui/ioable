@@ -360,6 +360,33 @@ describe IOable::BufferedInput do
       @io.getc
       @io.pos.should == 0
     end
+
+    it "should convert the result to the internal encoding if necessary" do
+      data = [ binary("あ") ]
+      stub(@byte_input).sysread(is_a(Integer)) { data.shift }
+      stub(@byte_input).eof? { data.empty? }
+
+      @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+      @io.getc.should == "あ".encode(Encoding::CP932)
+    end
+
+    it "should raise an InvalidByteSequenceError by default for a broken byte fragments" do
+      data = [ binary("\xFF\xFF") ]
+      stub(@byte_input).sysread(is_a(Integer)) { data.shift }
+      stub(@byte_input).eof? { data.empty? }
+
+      @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+      lambda { @io.getc }.should raise_error(Encoding::InvalidByteSequenceError)
+    end
+
+    it "should apply the specified convertion options if available" do
+      data = [ binary("\xFF\xFF") ]
+      stub(@byte_input).sysread(is_a(Integer)) { data.shift }
+      stub(@byte_input).eof? { data.empty? }
+
+      @io.set_encoding(Encoding::UTF_8, Encoding::CP932, invalid: :replace)
+      @io.getc.should == '?'
+    end
   end
 
   describe '#read' do
@@ -377,7 +404,7 @@ describe IOable::BufferedInput do
       }
     end
 
-    describe "on no arguments given" do
+    describe "on fulltext reading mode" do
       it "should call sysread until eof" do
         eof = false
         mock(@byte_input).eof?{ eof }.at_least(1)
@@ -424,7 +451,7 @@ describe IOable::BufferedInput do
       end
 
       it "should advance #pos by the actually consumed bytesize , but not by the bytesize of the resturned text on a conversion happened" do
-        @io.set_encoding(Encoding::CP932, Encoding::UTF_16LE)
+        @io.set_encoding(Encoding::UTF_8, Encoding::UTF_32LE)
         str = @io.read
         @io.pos.should_not == str.bytesize
         @io.pos.should == "abcdefg\nhijkあlmnopqr\n".bytesize
@@ -720,7 +747,7 @@ describe IOable::BufferedInput do
       end
     end
 
-    describe "on binary reading mode" do
+    describe "with nil separator" do
       it "should return the whole of file if $/ is nil" do
         @data = [ binary("abcd"), binary("efgh\ni"), binary("jk") ]
         $/ = nil
@@ -752,8 +779,25 @@ describe IOable::BufferedInput do
         @io.gets(nil).should == nil
       end
 
-      it "should return at most the specified number of bytes if limit is specified"
-      it "should not break a multibyte character at the specified limit"
+      it "should return at most the specified number of bytes if limit is specified" do
+        @data = [ binary("abcd"), binary("eあfgh\ni"), binary("jk") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
+
+        line = @io.gets(nil, 10)
+        line.should == "abcdeあfg".encode(Encoding::CP932)
+      end
+
+      it "should not break a multibyte character at the specified limit" do
+        @data = [ binary("abあcd\xFF\xFF"), binary("eあfgh\ni\xE3"), binary("\x81\x82jk") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932, invalid: :replace)
+
+        line = @io.gets(nil, 5)
+        line.should == "abあ".encode(Encoding::CP932)
+        line = @io.gets(nil, 6)
+        line.should == "cd\xFF\xFFeあ".encode(Encoding::CP932, invalid: :replace)
+        line = @io.gets(nil, 6)
+        line.should == "fgh\niあ".encode(Encoding::CP932)
+      end
     end
 
     describe "on paragraph mode" do
