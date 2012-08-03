@@ -630,6 +630,9 @@ describe IOable::CharInput do
       it "should return nil if eof" do
         @io.gets(nil).should == nil
       end
+
+      it "should return at most the specified number of bytes if limit is specified"
+      it "should not break a multibyte character at the specified limit"
     end
 
     describe "on paragraph mode" do
