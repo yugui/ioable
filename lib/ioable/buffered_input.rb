@@ -326,17 +326,15 @@ class IOable::BufferedInput
     outbuf.replace(@buf)
     @buf.clear
 
-    begin
-      until @byte_input.eof?
-        fillbuf
-        outbuf << @buf
-        @buf.clear
-      end
-    rescue Object
-      @buf[0...0] = outbuf
-      raise
+    until @byte_input.eof?
+      fillbuf
+      outbuf << @buf
+      @buf.clear
     end
     outbuf.force_encoding(@external_encoding)
+  rescue Object
+    @buf[0...0] = outbuf
+    raise
   end
 
   # Read bytes at most the specified length.
@@ -369,7 +367,10 @@ class IOable::BufferedInput
       break unless b
       line << b
     end
-    line.force_encoding(@external_encoding)
+    return line.force_encoding(@external_encoding)
+  rescue Object
+    @buf[0...0] = line
+    raise
   end
 end
 
