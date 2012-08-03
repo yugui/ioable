@@ -38,35 +38,6 @@ shared_examples_for 'byte-wide input' do
     end
   end
 
-  describe "#ungetbyte" do
-    it "should accept an integer" do
-      lambda { @io.ungetbyte(1) }.should_not raise_error
-    end
-    it "should not accept any negative integer" do
-      lambda { @io.ungetbyte(0) }.should_not raise_error
-      lambda { @io.ungetbyte(-1) }.should raise_error(TypeError)
-    end
-    it "should not accept >= 256" do
-      lambda { @io.ungetbyte(255) }.should_not raise_error
-      lambda { @io.ungetbyte(256) }.should raise_error(TypeError)
-    end
-    it "should accept a single byte string" do
-      lambda { @io.ungetbyte("a") }.should_not raise_error
-    end
-
-    it "should make the next call of #getbyte return the given byte" do
-      @io.ungetbyte(1)
-      dont_allow(@io).eof?
-      dont_allow(@io).sysread.with_any_args
-      @io.getbyte.should == 1
-
-      @io.ungetbyte("a")
-      dont_allow(@io).eof?
-      dont_allow(@io).sysread.with_any_args
-      @io.getbyte.should == ?a.ord
-    end
-  end
-
   describe '#readbyte' do
     it "should read a byte from sysread and return it" do
       mock(@io).eof?{ false }
@@ -244,21 +215,7 @@ shared_examples_for 'byte-wide input' do
   end
 
   describe "readpartial" do
-    it "should return the buffered content if available" do
-      @io.ungetbyte(1)
-      dont_allow(@io).eof?
-      @io.readpartial(100).should == binary("\x1")
-    end
-
-    it "replaces the given buffer if given" do
-      @io.ungetbyte(1)
-
-      buf = "abcde"
-      @io.readpartial(100, buf).should be_equal(buf)
-      buf.should == binary("\x1")
-    end
-
-    it "calls #sysread if the buffer is empty" do
+    it "calls #sysread" do
       stub(@io).eof? { false }
       mock(@io).sysread(100, is_a(String)) { binary("abcde") }
 
@@ -281,15 +238,19 @@ shared_examples_for 'byte-wide input' do
     end
   end
 
-  describe "readnonblock"
-  describe "nread" do
-    it "should return 0 at first" do
-      @io.nread.should == 0
-    end
+  describe "read_nonblock" do
+    it "should just call #sysread" do
+      mock(@io).sysread(1)
+      mock(@io).sysread(1, "abc")
 
-    it "should return 1 if called #ungetbyte" do
-      @io.ungetbyte(32)
-      @io.nread.should == 1
+      @io.read_nonblock(1)
+      @io.read_nonblock(1, "abc")
+    end
+  end
+
+  describe "nread" do
+    it "should always return 0" do
+      @io.nread.should == 0
     end
   end
 end

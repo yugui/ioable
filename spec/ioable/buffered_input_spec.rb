@@ -3,12 +3,12 @@
 require File.expand_path("../../spec_helper", __FILE__)
 require File.expand_path("../shared/empty_input_impl_spec.rb", __FILE__)
 
-require 'ioable/char_input'
+require 'ioable/buffered_input'
 
-describe IOable::CharInput do
+describe IOable::BufferedInput do
   before do
     @byte_input = Object.new
-    @io = IOable::CharInput.new(@byte_input, Encoding::UTF_8)
+    @io = IOable::BufferedInput.new(@byte_input, Encoding::UTF_8)
   end
 
   it_should_behave_like 'empty input impl'
@@ -53,6 +53,49 @@ describe IOable::CharInput do
     end
   end
 
+  describe "#ungetbyte" do
+    it "should accept an integer" do
+      lambda { @io.ungetbyte(1) }.should_not raise_error
+    end
+    it "should not accept any negative integer" do
+      lambda { @io.ungetbyte(0) }.should_not raise_error
+      lambda { @io.ungetbyte(-1) }.should raise_error(TypeError)
+    end
+    it "should not accept >= 256" do
+      lambda { @io.ungetbyte(255) }.should_not raise_error
+      lambda { @io.ungetbyte(256) }.should raise_error(TypeError)
+    end
+    it "should accept a single byte string" do
+      lambda { @io.ungetbyte("a") }.should_not raise_error
+    end
+
+    it "should let the next call of #getbyte return the given byte" do
+      @io.ungetbyte(1)
+      dont_allow(@byte_input).eof?
+      dont_allow(@byte_input).sysread.with_any_args
+      @io.getbyte.should == 1
+
+      @io.ungetbyte("a")
+      dont_allow(@byte_input).eof?
+      dont_allow(@byte_input).sysread.with_any_args
+      @io.getbyte.should == ?a.ord
+    end
+
+    it "should decrease #pos by 1" do
+      @io.ungetbyte(1)
+      @io.pos.should == -1
+      @io.getbyte
+      @io.pos.should == 0
+
+      stub(@byte_input).eof? { false }
+      stub(@byte_input).sysread(is_a(Integer)) { binary("a") }
+      @io.getbyte
+      @io.pos.should == 1
+      @io.ungetbyte("b")
+      @io.pos.should == 0
+    end
+  end
+
   describe '#pos' do
     before do
       stub(@byte_input).sysseek(is_a(Integer), anything)
@@ -70,8 +113,8 @@ describe IOable::CharInput do
       @io.pos.should == 10
     end
 
-    it "should call #sysseek on called" do
-      mock(@io).sysseek(10, IO::SEEK_SET)
+    it "should call #sysseek with SEEK_SET" do
+      mock(@byte_input).sysseek(10, IO::SEEK_SET)
 
       @io.pos = 10
     end
@@ -79,41 +122,41 @@ describe IOable::CharInput do
 
   describe "#seek" do
     before do
-      stub(@io).sysseek(is_a(Integer), anything)
+      stub(@byte_input).sysseek(is_a(Integer), anything) { 0 }
     end
 
-    it "should call #sysseek" do
-      mock(@io).sysseek(10, IO::SEEK_CUR)
+    it "should call @byte_input#sysseek" do
+      mock(@byte_input).sysseek(10, IO::SEEK_END)
       
-      @io.seek(10, IO::SEEK_CUR)
+      @io.seek(10, IO::SEEK_END)
     end
 
     it "should use IO::SEEK_SET if not specified the argument" do
-      mock(@io).sysseek(10, IO::SEEK_SET)
+      mock(@byte_input).sysseek(10, IO::SEEK_SET)
       
       @io.seek(10)
     end
 
     it "should set #pos to the given position" do
-      mock(@io).sysseek(10, IO::SEEK_SET) { 10 }
+      mock(@byte_input).sysseek(10, IO::SEEK_SET) { 10 }
       @io.seek(10)
       @io.pos.should == 10
 
-      mock(@io).sysseek(10, IO::SEEK_CUR) { 20 }
-      @io.seek(10, IO::SEEK_CUR)
+      mock(@byte_input).sysseek(-10, IO::SEEK_END) { 20 }
+      @io.seek(-10, IO::SEEK_END)
       @io.pos.should == 20
     end
     
     it 'should pass through the error sysseek rises' do
-      mock(@io).sysseek(10, IO::SEEK_SET) { raise Errno::ESPIPE }
+      mock(@byte_input).sysseek(10, IO::SEEK_SET) { raise Errno::ESPIPE }
       lambda { @io.seek(10) }.should raise_error(Errno::ESPIPE)
 
-      mock(@io).sysseek(100, IO::SEEK_SET) { raise Errno::EINVAL }
+      mock(@byte_input).sysseek(100, IO::SEEK_SET) { raise Errno::EINVAL }
       lambda { @io.seek(100) }.should raise_error(Errno::EINVAL)
     end
 
     it 'should not change #pos on error' do
-      stub(@io).sysseek(is_a(Integer), anything) { raise Errno::EBADF }
+      stub(@byte_input).sysseek(is_a(Integer), anything) { raise Errno::EBADF }
       @io.seek(10) rescue nil
 
       @io.pos.should == 0
@@ -124,7 +167,79 @@ describe IOable::CharInput do
       @io.seek(10).should == 0
     end
 
-    it "should accept an object responding to #to_int"
+    it "should clear the buffer" do
+      eof = false
+      stub(@byte_input).eof? { eof }
+      mock(@byte_input).sysread(is_a(Integer)) { binary("abcde") }
+      mock(@byte_input).sysseek(1, IO::SEEK_SET) { 1 }
+      mock(@byte_input).sysread(is_a(Integer)) { eof = true; binary("bcde") }
+
+      @io.read(3).should == binary("abc")
+      @io.ungetbyte("A")
+      @io.seek(1, IO::SEEK_SET)
+      @io.read.should == "bcde"
+    end
+
+    it "should calculate the target position from #pos" do
+      stub(@byte_input).eof? { false }
+      mock(@byte_input).sysread(is_a(Integer)) { binary("abcde") }
+      mock(@byte_input).sysseek(1, IO::SEEK_SET) { 1 }
+      mock(@byte_input).sysread(is_a(Integer)) { binary("bcde") }
+
+      @io.read(3).should == binary("abc")
+      @io.ungetbyte(1)
+      @io.pos.should == 2
+      @io.seek(-1, IO::SEEK_CUR)
+      @io.read(3).should == binary("bcd")
+    end
+
+    it "should accept an object responding to #to_int" do
+    end
+  end
+
+  describe "#sysseek" do
+    it "is delegated to the wrapped byte stream" do
+      mock(@byte_input).sysseek(10, IO::SEEK_CUR) { 1 }
+
+      @io.sysseek(10, IO::SEEK_CUR)
+    end
+
+    it "raises an Errno::EINVAL if the buffer is not empty" do
+      dont_allow(@byte_input).sysseek.with_any_args
+      @io.ungetbyte(1)
+      lambda { @io.sysseek(10) }.should raise_error(Errno::EINVAL, /sysseek for buffered IO/)
+    end
+
+    it "should use IO::SEEK_SET if not specified the argument" do
+      mock(@byte_input).sysseek(10, IO::SEEK_SET)
+      
+      @io.sysseek(10)
+    end
+
+    it "should set #pos to the given position" do
+      mock(@byte_input).sysseek(10, IO::SEEK_SET) { 10 }
+      @io.sysseek(10)
+      @io.pos.should == 10
+
+      mock(@byte_input).sysseek(-10, IO::SEEK_END) { 20 }
+      @io.sysseek(-10, IO::SEEK_END)
+      @io.pos.should == 20
+    end
+    
+    it 'should pass through the error sysseek rises' do
+      mock(@byte_input).sysseek(10, IO::SEEK_SET) { raise Errno::ESPIPE }
+      lambda { @io.sysseek(10) }.should raise_error(Errno::ESPIPE)
+
+      mock(@byte_input).sysseek(100, IO::SEEK_SET) { raise Errno::EINVAL }
+      lambda { @io.sysseek(100) }.should raise_error(Errno::EINVAL)
+    end
+
+    it 'should not change #pos on error' do
+      stub(@byte_input).sysseek(is_a(Integer), anything) { raise Errno::EBADF }
+      @io.sysseek(10) rescue nil
+
+      @io.pos.should == 0
+    end
   end
 
   describe '#rewind' do

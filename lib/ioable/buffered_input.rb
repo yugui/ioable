@@ -2,17 +2,21 @@
 require 'forwardable'
 require 'ioable/byte_inputtable'
 
-# A wrapper class to provides a full input functionalities based on the wrapped
+# A wrapper class to provides a full input functionalities based on a wrapped
 # byte stream.
-class IOable::CharInput
+#
+# The wrapped byte stream must implement at least the following methods:
+# * #eof?
+# * #sysseek
+# * #sysread
+#
+class IOable::BufferedInput
   include IOable::ByteInputtable
   extend Forwardable
 
   SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
 
-  # byte_input::
-  #    The byte stream to wrap.
-  #    It must provide _#sysread_, _#sysseek_ and _#eof?_.
+  # byte_input:: The byte stream to wrap.
   # external:: External encoding of this input. Ignored if the Ruby is a 1.8.x.
   # internal:: Internal encoding of this input. Ignored if the Ruby is a 1.8.x.
   # opt:: Character conversion options for this input. Ignored if the Ruby is a 1.8.x.
@@ -43,7 +47,7 @@ class IOable::CharInput
 
   attr_reader :external_encoding, :internal_encoding
   attr_accessor :lineno
-  def_delegators :@byte_input, :sysread, :sysseek
+  def_delegators :@byte_input, :sysread
 
   def set_encoding(*args)
     unless (1..3).include? args.size
@@ -113,6 +117,21 @@ class IOable::CharInput
     end
 
     @pos -= 1
+  end
+
+  def seek(amount, whence = IO::SEEK_SET)
+    @buf.clear
+    if whence == IO::SEEK_CUR
+      @pos += amount
+      return super(@pos, IO::SEEK_SET)
+    else
+      return super
+    end
+  end
+
+  def sysseek(amount, whence = IO::SEEK_SET)
+    raise Errno::EINVAL, "sysseek for buffered IO" unless @buf.empty?
+    @pos = @byte_input.sysseek(amount, whence)
   end
 
   MAX_ASCII_BYTE = 127

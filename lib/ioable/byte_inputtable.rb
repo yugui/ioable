@@ -15,7 +15,15 @@ end
 # * sysseek
 # * sysread
 # * eof?
-# Optionally it would be better to override #nread according to your #sysread implementation.
+#
+# And optionally it is recommended to override the following methods if possible:
+# #nread::
+#   Override this according to your #sysread implementation for providing better information.
+# #read_nonblock::
+#   Override if your input can be non blockable. The default impelementation of
+#   IOable::ByteInputtable#read_nonblock DOES BLOCK.
+#
+# This module does not provide #ungetbyte. You need to wrap your input with BufferedInput.
 module IOable::ByteInputtable
   include IOable::CommonInputtable
 
@@ -40,10 +48,7 @@ module IOable::ByteInputtable
   end
 
   def getbyte
-    if !@buf.nil?
-      b, @buf = @buf, nil
-      return b
-    elsif eof?
+    if eof?
       return nil
     else
       b = sysread(1)[0].ord
@@ -68,34 +73,22 @@ module IOable::ByteInputtable
     end
   end
 
-  def ungetbyte(b)
-    case b
-    when Integer
-      raise TypeError, "must be in 0...256, but got #{b}" unless (0...256).include?(b)
-      @buf = b
-
-    when String
-      @buf = b[0].ord
-
-    else
-      raise TypeError, "expected a byte or a string, but got #{b.class}"
-    end
-  end
-
   def nread
-    return @buf.nil? ? 0 : 1
+    return 0
   end
 
   def readpartial(maxlen, outbuf = nil)
     outbuf ||= ""
-    if !@buf.nil?
-      return outbuf.replace(@buf.chr.force_encoding(Encoding::ASCII_8BIT))
-    elsif eof?
+    if eof?
       raise EOFError, "end of file reached"
     else
       return sysread(maxlen, outbuf)
     end
   rescue Errno::EINTR, Errno::EWOULDBLOCK, Errno::EAGAIN
     retry
+  end
+
+  def read_nonblock(maxlen, outbuf = nil)
+    sysread(*[maxlen, outbuf].compact)
   end
 end
