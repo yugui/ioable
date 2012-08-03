@@ -181,12 +181,20 @@ class IOable::BufferedInput
 
     return nil if @buf.empty? and @byte_input.eof?
     if rs.nil?
-      line = read(limit)
-    elsif limit
-      line = naive_gets_raw(rs, limit)
+      if limit.nil?
+        return read
+      else
+        line = "".force_encoding(Encoding::ASCII_8BIT)
+        line = read_length_bytes(limit, line)
+      end
     else
-       rs = rs.empty? ? "\n\n" : rs
-      line = naive_gets_raw(rs, Float::INFINITY)
+      rs = rs.empty? ? "\n\n" : rs
+      if limit.nil?
+        line = naive_gets_raw(rs, Float::INFINITY)
+      else
+        line = naive_gets_raw(rs, limit)
+      end
+    end
 #       start_index = 0
 #       until index = @buf.dup.force_encoding(@external_encoding).index(rs, start_index)
 #         if @byte_input.eof?
@@ -199,7 +207,6 @@ class IOable::BufferedInput
 #       end_index = index + rs.length
 #       line = @buf.dup.force_encoding(@external_encoding)[0...end_index]
 #       @buf[0...line.bytesize] = ""
-    end
 
     @pos += line.bytesize
     line.force_encoding(@external_encoding)
@@ -213,25 +220,14 @@ class IOable::BufferedInput
   def read(length = nil, outbuf = "")
     case
     when length.nil?
-      outbuf.replace(@buf)
-      return nil if @buf.empty? and @byte_input.eof?
-      @buf.clear
-      begin
-        until @byte_input.eof?
-          fillbuf
-          outbuf << @buf
-          @buf.clear
-        end
-      rescue Object
-        @buf[0...0] = outbuf
-        raise
+      if @buf.empty? and @byte_input.eof?
+        outbuf.clear.force_encoding(@external_encoding)
+        return nil
       end
-      outbuf.force_encoding(@external_encoding)
-      @pos += outbuf.bytesize
 
-      if @internal_encoding and @internal_encoding != @external_encoding
-        outbuf.encode!(@internal_encoding)
-      end
+      read_full_contents_raw(outbuf)
+      @pos += outbuf.bytesize
+      outbuf = to_internal(outbuf)
       return outbuf
 
     when length == 0
@@ -240,25 +236,11 @@ class IOable::BufferedInput
     when length < 0
       raise ArgumentError, "the given length is negative"
 
-    when length.kind_of?(Integer) ||
-      (length.repond_to?(:to_int) and (length = length.to_int).kind_of?(Integer))
-
+    when length = ConvertHelper.try_convert(length, Integer, :to_int)
       outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
       return nil if @buf.empty? and @byte_input.eof?
 
-      begin
-        loop do
-          new_chunk = @buf[0...length]
-          outbuf << new_chunk
-          length -= new_chunk.length
-          @buf[0...new_chunk.length] = ""
-          break if length == 0 or @byte_input.eof?
-          fillbuf
-        end
-      rescue Object
-        @buf[0...0] = outbuf
-        raise
-      end
+      read_length_bytes(length, outbuf)
       @pos += outbuf.bytesize
       return outbuf
     end
@@ -331,6 +313,39 @@ class IOable::BufferedInput
     else
       str.encode(@internal_encoding)
     end
+  end
+
+  # Reads until eof. Return the result in the external encoding.
+  def read_full_contents_raw(outbuf)
+    outbuf.replace(@buf)
+    @buf.clear
+
+    begin
+      until @byte_input.eof?
+        fillbuf
+        outbuf << @buf
+        @buf.clear
+      end
+    rescue Object
+      @buf[0...0] = outbuf
+      raise
+    end
+    outbuf.force_encoding(@external_encoding)
+  end
+
+  def read_length_bytes(length, outbuf)
+    loop do
+      new_chunk = @buf[0...length]
+      outbuf << new_chunk
+      length -= new_chunk.length
+      @buf[0...new_chunk.length] = ""
+      break if length == 0 or @byte_input.eof?
+      fillbuf
+    end
+    return outbuf
+  rescue Object
+    @buf[0...0] = outbuf
+    raise
   end
 end
 

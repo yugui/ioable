@@ -740,7 +740,7 @@ describe IOable::BufferedInput do
         line.encoding.should == Encoding::UTF_8
       end
 
-      it "should convert the returned string to the internal encoding if it is not nil" do
+      it "should convert the returned string to the internal encoding unless the internal encoding is nil" do
         @data = [ binary("abcd"), binary("eあfgh\ni"), binary("jk") ]
         @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
 
