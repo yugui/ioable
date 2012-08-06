@@ -175,7 +175,7 @@ class IOable::BufferedInput
       raise ArgumentError, "wrong number of arguments #{args.size} for 0..2"
     end
 
-    io_enc = @internal_encoding || @external_encoding
+    io_enc = @internal_encoding || Encoding.default_internal || @external_encoding
 
     unless rs.nil? or rs.encoding == io_enc or 
       (rs.ascii_only? and (rs.empty? or io_enc.ascii_compatible?)) then
@@ -186,7 +186,11 @@ class IOable::BufferedInput
       end
     end
 
-    return nil if @buf.empty? and @byte_input.eof?
+    if @buf.empty? and @byte_input.eof?
+      return limit == 0 ?
+        "".force_encoding(@internal_encoding || Encoding.default_internal || @external_encoding) :
+        nil
+    end
     if rs.nil?
       if limit.nil?
         return read
@@ -224,25 +228,17 @@ class IOable::BufferedInput
   end
 
   def read(length = nil, outbuf = "")
-    case
-    when length.nil?
-      if @buf.empty? and @byte_input.eof?
-        outbuf.clear.force_encoding(@external_encoding)
-        return nil
-      end
+    return read_full_contents(outbuf) if length.nil?
+    length = ConvertHelper.try_convert(length, Integer, :to_int)
 
-      read_full_contents_raw(outbuf)
-      @pos += outbuf.bytesize
-      outbuf = to_internal(outbuf)
-      return outbuf
-
-    when length == 0
-      return outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
-
-    when length < 0
+    case length <=> 0
+    when -1
       raise ArgumentError, "the given length is negative"
 
-    when length = ConvertHelper.try_convert(length, Integer, :to_int)
+    when 0
+      return outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
+
+    when 1
       outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
       return nil if @buf.empty? and @byte_input.eof?
 
@@ -314,10 +310,11 @@ class IOable::BufferedInput
   # Precondition: str.encoding must be in @external_encoding
   def to_internal(str, opt = {})
     raise ArgumentError if str.encoding != @external_encoding
-    if @internal_encoding.nil? or @internal_encoding == @external_encoding
+    internal = @internal_encoding || Encoding.default_internal
+    if internal.nil? or internal == @external_encoding
       str
     else
-      str.encode(@internal_encoding, @convert_options.merge(opt))
+      str.encode(internal, @convert_options.merge(opt))
     end
   end
 
@@ -335,6 +332,18 @@ class IOable::BufferedInput
   rescue Object
     @buf[0...0] = outbuf
     raise
+  end
+
+  def read_full_contents(outbuf)
+    if @buf.empty? and @byte_input.eof?
+      outbuf.clear.force_encoding(@external_encoding)
+      return nil
+    end
+
+    read_full_contents_raw(outbuf)
+    @pos += outbuf.bytesize
+    outbuf = to_internal(outbuf)
+    return outbuf
   end
 
   # Read bytes at most the specified length.
@@ -373,4 +382,3 @@ class IOable::BufferedInput
     raise
   end
 end
-

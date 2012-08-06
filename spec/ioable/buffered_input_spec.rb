@@ -567,7 +567,14 @@ describe IOable::BufferedInput do
         lambda { @io.read(-1) }.should raise_error(ArgumentError)
       end
 
-      it "should accept an object responding to #to_int"
+      it "should accept an object responding to #to_int" do
+        len = Object.new
+        stub(len).to_int { 1 }
+        stub(@byte_input).eof? { false }
+        stub(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+
+        @io.read(len).should == binary("a")
+      end
     end
   end
 
