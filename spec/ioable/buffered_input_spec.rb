@@ -669,6 +669,33 @@ describe IOable::BufferedInput do
         @io.gets
         @io.lineno.should == 2
       end
+
+      it "should read at most the specified bytes" do
+        @data = [ binary("abc\nd"), binary("efgh\ni"), binary("\njk") ]
+        @io.gets(2).should == "ab"
+        @io.gets(3).should == "c\n"
+        @io.gets(nil, 9).should == "defgh\ni\nj"
+      end
+
+      it "should not break a character to fit to limit" do
+        @data = [ binary("あabc") ]
+
+        @io.gets(2).should == "あ"
+      end
+
+      it "should return an empty string when limit == 0 even if eof" do
+        @data = []
+        @io.gets(0).should == ""
+      end
+
+      it "should count the specified bytes in the external encoding" do
+        @data = [ binary("abc"), binary("あいう".encode(Encoding::CP932)), binary("abc") ]
+        @io.set_encoding(Encoding::CP932, Encoding::UTF_8)
+
+        @io.gets(6).should == "abcあい"
+      end
+
+      it "should accept an object responding to #to_int as a limit"
     end
 
     describe "with an alternative line separator" do
@@ -752,6 +779,20 @@ describe IOable::BufferedInput do
         @io.gets("あ")
         @io.lineno.should == 2
       end
+
+      it "should not recognize a part of char as a separator" do
+        # "表" contains \x5c
+        @data = [ "バイト表現に0x5C(\\)".encode(Encoding::CP932).force_encoding(Encoding::ASCII_8BIT) ]
+
+        @io.set_encoding(Encoding::CP932)
+        @io.gets('\\').should == "バイト表現に0x5C(\\".encode(Encoding::CP932)
+        @io.gets('\\').should == ")".encode(Encoding::CP932)
+
+        # \x82 is valid as both a leading byte and a following byte in CP932.
+        @data = [ "\x81\x82\x82\x82".force_encoding(Encoding::CP932) ]
+        @io.gets("\x82\x82".force_encoding(Encoding::CP932)).should ==
+          "\x81\x82\x82\x82".force_encoding(Encoding::CP932)
+      end
     end
 
     describe "with nil separator" do
@@ -820,43 +861,6 @@ describe IOable::BufferedInput do
       it "should not break a multibyte character at the specified limit"
     end
 
-    it "should read at most the specified bytes" do
-      @data = [ binary("abc\nd"), binary("efgh\ni"), binary("\njk") ]
-      @io.gets(2).should == "ab"
-      @io.gets(3).should == "c\n"
-      @io.gets(nil, 9).should == "defgh\ni\nj"
-    end
-
-    it "should not break a character to fit to limit" do
-      @data = [ binary("あabc") ]
-
-      @io.gets(2).should == "あ"
-    end
-
-    it "should return an empty string when limit == 0 even if eof"
-
-    it "should count the specified bytes in the external encoding" do
-      @data = [ binary("abc"), binary("あいう".encode(Encoding::CP932)), binary("abc") ]
-      @io.set_encoding(Encoding::CP932, Encoding::UTF_8)
-
-      @io.gets(6).should == "abcあい"
-    end
-
-    it "should not recognize a part of char as a separator" do
-      # "表" contains \x5c
-      @data = [ "バイト表現に0x5C(\\)".encode(Encoding::CP932).force_encoding(Encoding::ASCII_8BIT) ]
-
-      @io.set_encoding(Encoding::CP932)
-      @io.gets('\\').should == "バイト表現に0x5C(\\".encode(Encoding::CP932)
-      @io.gets('\\').should == ")".encode(Encoding::CP932)
-
-      # \x82 is valid as both a leading byte and a following byte in CP932.
-      @data = [ "\x81\x82\x82\x82".force_encoding(Encoding::CP932) ]
-      @io.gets("\x82\x82".force_encoding(Encoding::CP932)).should ==
-        "\x81\x82\x82\x82".force_encoding(Encoding::CP932)
-    end
-
-    it "should accept an object responding to #to_int as a limit"
   end
 
   describe "#ungetc" do
