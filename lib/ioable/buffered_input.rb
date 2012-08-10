@@ -200,24 +200,15 @@ class IOable::BufferedInput
     else
       rs = rs.empty? ? "\n\n" : rs
       if limit.nil?
-        line = naive_gets_raw(rs, Float::INFINITY)
+        if rs.length == 1 and rs.ascii_only? and @external_encoding.ascii_compatible?
+          line = fast_gets_raw(rs)
+        else
+          line = naive_gets_raw(rs, Float::INFINITY)
+        end
       else
         line = naive_gets_raw(rs, limit)
       end
     end
-#       start_index = 0
-#       until index = @buf.dup.force_encoding(@external_encoding).index(rs, start_index)
-#         if @byte_input.eof?
-#           index = @buf.dup.force_encoding(@external_encoding).length
-#           break
-#         end
-#         start_index = [@buf.length - rs.bytesize + 1, 0].max
-#         fillbuf
-#       end
-#       end_index = index + rs.length
-#       line = @buf.dup.force_encoding(@external_encoding)[0...end_index]
-#       @buf[0...line.bytesize] = ""
-
     @pos += line.bytesize
     line.force_encoding(@external_encoding)
     line = to_internal(line)
@@ -307,6 +298,29 @@ class IOable::BufferedInput
     return line
   end
 
+  # A fast implementation of gets(rs).
+  # Works only if _rs_ is an ASCII character and the external_encoding is ASCII-compatible.
+  # But this catches the most use case of #gets.
+  def fast_gets_raw(rs)
+    index = -1
+    begin
+      start_index = index + 1
+      until index = @buf.index(rs, start_index)
+        start_index = @buf.size
+        if @byte_input.eof?
+          index = -1
+          line = @buf.clone
+          @buf.clear
+          return line
+        end
+        fillbuf
+      end
+      line = @buf[0..index]
+    end until line.force_encoding(@external_encoding)[-1] == rs
+    @buf[0..index] = ""
+    return line
+  end
+
   # Precondition: str.encoding must be in @external_encoding
   def to_internal(str, opt = {})
     raise ArgumentError if str.encoding != @external_encoding
@@ -334,6 +348,7 @@ class IOable::BufferedInput
     raise
   end
 
+  # Implementation of read(nil, outbuf)
   def read_full_contents(outbuf)
     if @buf.empty? and @byte_input.eof?
       outbuf.clear.force_encoding(@external_encoding)
