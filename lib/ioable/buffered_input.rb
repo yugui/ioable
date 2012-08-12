@@ -104,7 +104,7 @@ class IOable::BufferedInput
       return nil if @byte_input.eof?
       fillbuf 
     end
-    b = @buf.shift.ord
+    b = shiftbuf.ord
     @pos += 1
     return b
   end
@@ -233,7 +233,7 @@ class IOable::BufferedInput
       outbuf.clear.force_encoding(Encoding::ASCII_8BIT)
       return nil if @buf.empty? and @byte_input.eof?
 
-      read_length_bytes(length, outbuf)
+      read_specified_num_of_bytes(length, outbuf)
       @pos += outbuf.bytesize
       return outbuf
     end
@@ -250,6 +250,14 @@ class IOable::BufferedInput
     retry
   end
 
+  def shiftbuf(len = 1)
+    if $DEBUG
+      raise unless @buf.size >= len
+    end
+
+    return @buf[0, len].tap { @buf[0, len] = "" }
+  end
+
   # Similar to getc but:
   # * Does not convert the result to the internal string even if necessary.
   # * Does not advance #pos
@@ -260,7 +268,7 @@ class IOable::BufferedInput
     end
 
     if @external_encoding.ascii_compatible? and @buf[0].ord < MAX_ASCII_BYTE
-      char = @buf.shift.force_encoding(@external_encoding)
+      char = shiftbuf.force_encoding(@external_encoding)
     else
       (1..MAX_BYTES_FOR_CHAR).each do |length|
         if @buf.length < length
@@ -280,7 +288,7 @@ class IOable::BufferedInput
         end
       end
 
-      char = @buf.shift.force_encoding(@external_encoding) if char.nil?
+      char = shiftbuf.force_encoding(@external_encoding) if char.nil?
     end
     return char
   end
@@ -334,18 +342,10 @@ class IOable::BufferedInput
 
   # Reads until eof. Return the result in the external encoding.
   def read_full_contents_raw(outbuf)
+    fillbuf until @byte_input.eof?
     outbuf.replace(@buf)
     @buf.clear
-
-    until @byte_input.eof?
-      fillbuf
-      outbuf << @buf
-      @buf.clear
-    end
     outbuf.force_encoding(@external_encoding)
-  rescue Object
-    @buf[0...0] = outbuf
-    raise
   end
 
   # Implementation of read(nil, outbuf)
@@ -362,7 +362,7 @@ class IOable::BufferedInput
   end
 
   # Read bytes at most the specified length.
-  def read_length_bytes(length, outbuf)
+  def read_specified_num_of_bytes(length, outbuf)
     loop do
       new_chunk = @buf[0...length]
       outbuf << new_chunk
@@ -380,7 +380,7 @@ class IOable::BufferedInput
   # @return encoded in @external_encoding
   def read_chars_limited_length(limit)
     line = "".force_encoding(Encoding::ASCII_8BIT)
-    line = read_length_bytes(limit, line)
+    line = read_specified_num_of_bytes(limit, line)
 
     MAX_BYTES_FOR_CHAR.times do
       line_ext = line.dup.force_encoding(@external_encoding)
