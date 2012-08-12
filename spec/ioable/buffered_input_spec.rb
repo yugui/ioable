@@ -194,6 +194,11 @@ describe IOable::BufferedInput do
     end
 
     it "should accept an object responding to #to_int" do
+      offset = Object.new
+      stub(offset).to_int { 1 }
+      mock(@byte_input).sysseek(1, IO::SEEK_SET) { 1 }
+
+      @io.seek(offset)
     end
   end
 
@@ -695,7 +700,13 @@ describe IOable::BufferedInput do
         @io.gets(6).should == "abcあい"
       end
 
-      it "should accept an object responding to #to_int as a limit"
+      it "should accept an object responding to #to_int as a limit" do
+        @data = [ binary("abc"), binary("de\ng") ]
+        len = Object.new
+        stub(len).to_int { 4 }
+
+        @io.gets(len).should == "abcd"
+      end
     end
 
     describe "with an alternative line separator" do
@@ -857,7 +868,25 @@ describe IOable::BufferedInput do
         @io.gets.should == "defgh\ni\n\n"
         @io.gets.should == "jk"
       end
-      it "should return at most the specified number of bytes if limit is specified"
+
+      it "can handle more than one empty lines" do
+        @data = [ binary("\nabc\n\ndef\n\n\nghi\n\n\n\njkl\n") ]
+        @io.gets.should == "abc\n\n"
+        @io.gets.should == "def\n\n"
+        @io.gets.should == "ghi\n\n"
+        @io.gets.should == "jkl\n"
+        @io.gets.should == nil
+      end
+
+      it "should return at most the specified number of bytes if limit is specified" do
+        @data = [ binary("abc\n\nd"), binary("efgh\n\ni\n"), binary("\njk") ]
+        @io.gets("", 3).should == "abc"
+        @io.gets("", 1).should == "d"
+        @io.gets("", 5).should == "efgh\n"
+        @io.gets("", 2).should == "i\n"
+        @io.gets("", 2).should == "jk"
+      end
+
       it "should not break a multibyte character at the specified limit"
     end
 
