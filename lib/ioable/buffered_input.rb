@@ -15,6 +15,7 @@ class IOable::BufferedInput
   extend Forwardable
 
   SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
+  EMPTY_BUFFER = "".force_encoding(Encoding::ASCII_8BIT).freeze
 
   # byte_input:: The byte stream to wrap.
   # external:: External encoding of this input. Ignored if the Ruby is a 1.8.x.
@@ -26,7 +27,7 @@ class IOable::BufferedInput
     @pos = 0
     @lineno = 0
     @byte_input = byte_input
-    @buf = "".force_encoding(Encoding::ASCII_8BIT)
+    @buf = EMPTY_BUFFER.dup
     @buf.instance_eval do
       def shift(len = 1)
         self[0, len].tap{ self[0, len] = "" }
@@ -102,7 +103,7 @@ class IOable::BufferedInput
   def getbyte
     if @buf.empty?
       return nil if @byte_input.eof?
-      fillbuf 
+      fillbuf
     end
     b = shiftbuf.ord
     @pos += 1
@@ -258,6 +259,10 @@ class IOable::BufferedInput
     return @buf[0, len].tap { @buf[0, len] = "" }
   end
 
+  def flushbuf
+    return @buf.tap{ @buf = EMPTY_BUFFER.dup }
+  end
+
   # Similar to getc but:
   # * Does not convert the result to the internal string even if necessary.
   # * Does not advance #pos
@@ -340,14 +345,6 @@ class IOable::BufferedInput
     end
   end
 
-  # Reads until eof. Return the result in the external encoding.
-  def read_full_contents_raw(outbuf)
-    fillbuf until @byte_input.eof?
-    outbuf.replace(@buf)
-    @buf.clear
-    outbuf.force_encoding(@external_encoding)
-  end
-
   # Implementation of read(nil, outbuf)
   def read_full_contents(outbuf)
     if @buf.empty? and @byte_input.eof?
@@ -361,9 +358,27 @@ class IOable::BufferedInput
     return outbuf
   end
 
+  # Reads until eof. Return the result in the external encoding.
+  def read_full_contents_raw(outbuf)
+    outbuf.clear
+    loop do
+      # Do not increase the size of @buf to save memory on copying it to outbuf.
+      outbuf << flushbuf
+      break if @byte_input.eof?
+      fillbuf
+    end
+    outbuf.force_encoding(@external_encoding)
+    return outbuf
+  rescue Object
+    @buf[0...0] = outbuf
+    raise
+  end
+
+
   # Read bytes at most the specified length.
   def read_specified_num_of_bytes(length, outbuf)
     loop do
+      # Do not increase the size of @buf to save memory on copying it to outbuf.
       new_chunk = @buf[0...length]
       outbuf << new_chunk
       length -= new_chunk.length
@@ -379,8 +394,7 @@ class IOable::BufferedInput
 
   # @return encoded in @external_encoding
   def read_chars_limited_length(limit)
-    line = "".force_encoding(Encoding::ASCII_8BIT)
-    line = read_specified_num_of_bytes(limit, line)
+    line = read_specified_num_of_bytes(limit, EMPTY_BUFFER.dup)
 
     MAX_BYTES_FOR_CHAR.times do
       line_ext = line.dup.force_encoding(@external_encoding)
