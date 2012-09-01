@@ -199,7 +199,10 @@ class IOable::BufferedInput
         line = read_chars_limited_length(limit)
       end
     else
-      rs = rs.empty? ? "\n\n" : rs
+      if rs.empty?
+        paragraph_mode = true
+        rs = "\n\n"
+      end
       if limit.nil?
         if rs.length == 1 and rs.ascii_only? and @external_encoding.ascii_compatible?
           line = fast_gets_raw(rs)
@@ -208,6 +211,15 @@ class IOable::BufferedInput
         end
       else
         line = naive_gets_raw(rs, limit)
+      end
+      if paragraph_mode
+        # consumes all subsequent line breaks.
+        until index = @buf.index(/[^\n]/on)
+          line << flushbuf
+          break if @byte_input.eof?
+          fillbuf
+        end
+        line << shiftbuf(index) if index
       end
     end
     @pos += line.bytesize
