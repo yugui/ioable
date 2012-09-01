@@ -13,6 +13,24 @@ describe IOable::BufferedInput do
 
   it_should_behave_like 'empty input impl'
 
+  shared_examples_for '#read() family' do
+    before do
+      is_eof = false
+      stub(@byte_input).eof? { is_eof }
+      stub(@byte_input).sysread.with_any_args { is_eof = true; binary("a") }
+    end
+
+    it "should raise an ArgumentError if the first argument is negative" do
+      lambda { @io.send(@read_method, *@read_args, -1) }.should raise_error(ArgumentError, /negative/)
+    end
+
+    it "should send #to_int to the first argument if it is not an integer" do
+      len = Object.new
+      mock(len).to_int { 1 }
+      @io.send(@read_method, *@read_args, len).should == 'a'
+    end
+  end
+
   describe '#getbyte' do
     it "should read a chunk of bytes from the internal byte stream" do
       mock(@byte_input).eof?{ false }
@@ -590,17 +608,10 @@ describe IOable::BufferedInput do
         buf.should be_empty
       end
 
-      it "should raise ArgumentError if the length is negative" do
-        lambda { @io.read(-1) }.should raise_error(ArgumentError)
-      end
-
-      it "should accept an object responding to #to_int" do
-        len = Object.new
-        stub(len).to_int { 1 }
-        stub(@byte_input).eof? { false }
-        stub(@byte_input).sysread(is_a(Integer)) { binary("abc") }
-
-        @io.read(len).should == binary("a")
+      it_should_behave_like('#read() family') do
+        before do
+          @read_method = :read
+        end
       end
     end
   end
@@ -729,6 +740,12 @@ describe IOable::BufferedInput do
 
         @io.gets(len).should == "abcd"
       end
+
+      it_should_behave_like '#read() family' do
+        before do
+          @read_method = :gets
+        end
+      end
     end
 
     describe "with an alternative line separator" do
@@ -826,6 +843,13 @@ describe IOable::BufferedInput do
         @io.gets("\x82\x82".force_encoding(Encoding::CP932)).should ==
           "\x81\x82\x82\x82".force_encoding(Encoding::CP932)
       end
+
+      it_should_behave_like '#read() family' do
+        before do
+          @read_method = :gets
+          @read_args = [ "b" ]
+        end
+      end
     end
 
     describe "with nil separator" do
@@ -878,6 +902,13 @@ describe IOable::BufferedInput do
         line.should == "cd\xFF\xFFeあ".encode(Encoding::CP932, invalid: :replace)
         line = @io.gets(nil, 6)
         line.should == "fgh\niあ".encode(Encoding::CP932)
+      end
+
+      it_should_behave_like '#read() family' do
+        before do
+          @read_method = :gets
+          @read_args = [ nil ]
+        end
       end
     end
 
@@ -958,6 +989,13 @@ describe IOable::BufferedInput do
 
         line = @io.gets("", 4)
         line.should == "aあ".encode(Encoding::CP932)
+      end
+
+      it_should_behave_like '#read() family' do
+        before do
+          @read_method = :gets
+          @read_args = [ "" ]
+        end
       end
     end
   end
@@ -1146,6 +1184,12 @@ describe IOable::BufferedInput do
       output = "あいう"
       @io.readpartial(100, output).should be_nil
       output.should be_empty
+    end
+
+    it_should_behave_like '#read() family' do
+      before do
+        @read_method = :readpartial
+      end
     end
   end
 

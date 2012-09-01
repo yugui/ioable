@@ -170,17 +170,23 @@ class IOable::BufferedInput
       when args[0].kind_of?(Integer)
         limit = args[0]
       when args[0].respond_to?(:to_str)
-        rs = args[0].to_str
-        raise TypeError, "#{args[0]}.to_str did not return an String" unless limit.kind_of?(String)
+        rs = args[0]
       when args[0].respond_to?(:to_int)
-        limit = args[0].to_int
-        raise TypeError, "#{args[0]}.to_int did not return an Integer" unless limit.kind_of?(Integer)
+        limit = args[0]
+      else
+        raise TypeError, "expected a String or an Integer, but got #{args[0].class}"
       end
     when 2
       rs, limit = *args
     else
       raise ArgumentError, "wrong number of arguments #{args.size} for 0..2"
     end
+
+    unless limit.nil?
+      limit = ConvertHelper.try_convert(limit, Integer, :to_int)
+      raise ArgumentError, "the given length is negative" if limit < 0
+    end
+    rs = ConvertHelper.try_convert(rs, String, :to_str) unless rs.nil?
 
     io_enc = @internal_encoding || Encoding.default_internal || @external_encoding
 
@@ -252,6 +258,13 @@ class IOable::BufferedInput
   end
 
   def readpartial(length = nil, outbuf = "")
+    length = ConvertHelper.try_convert(length, Integer, :to_int)
+    if length < 0
+      raise ArgumentError, "the given length is negative"
+    elsif length == 0
+      return EMPTY_BUFFER.dup
+    end
+
     case @buf.length <=> length
     when 1
       outbuf.replace(shiftbuf(length))
