@@ -28,11 +28,6 @@ class IOable::BufferedInput
     @lineno = 0
     @byte_input = byte_input
     @buf = EMPTY_BUFFER.dup
-    @buf.instance_eval do
-      def shift(len = 1)
-        self[0, len].tap{ self[0, len] = "" }
-      end
-    end
     return unless SUPPORT_ENCODING
     initialize_encodings(external, internal, opt)
   end
