@@ -44,7 +44,7 @@ describe IOable::BufferedInput do
       @io.getbyte
       @io.pos.should == 2
     end
-    
+
     it "should not advance pos if eof" do
       mock(@byte_input).eof?{ true }
 
@@ -149,13 +149,13 @@ describe IOable::BufferedInput do
 
     it "should call @byte_input#sysseek" do
       mock(@byte_input).sysseek(10, IO::SEEK_END)
-      
+
       @io.seek(10, IO::SEEK_END)
     end
 
     it "should use IO::SEEK_SET if not specified the argument" do
       mock(@byte_input).sysseek(10, IO::SEEK_SET)
-      
+
       @io.seek(10)
     end
 
@@ -168,7 +168,7 @@ describe IOable::BufferedInput do
       @io.seek(-10, IO::SEEK_END)
       @io.pos.should == 20
     end
-    
+
     it 'should pass through the error sysseek rises' do
       mock(@byte_input).sysseek(10, IO::SEEK_SET) { raise Errno::ESPIPE }
       lambda { @io.seek(10) }.should raise_error(Errno::ESPIPE)
@@ -1033,7 +1033,122 @@ describe IOable::BufferedInput do
     end
   end
 
-  describe "#readpartial"
+  describe "#readpartial" do
+    before do
+      @data = []
+      stub(@byte_input).sysread(is_a(Integer)) { @data.shift }
+      stub(@byte_input).eof?{ @data.empty? }
+    end
+
+    it "should return at most the specified number of bytes" do
+      @data = [ binary("abcdef") ]
+      @io.readpartial(2).should == binary("ab")
+      @io.readpartial(2).should == binary("cd")
+      @io.readpartial(2).should == binary("ef")
+    end
+
+    it "should return a binary string" do
+      @data = [ binary("abcdef") ]
+      @io.readpartial(2).encoding.should == Encoding::ASCII_8BIT
+    end
+
+    it "should return the bufferred bytes if available" do
+      stub(@byte_input).eof? { false }
+
+      mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+      @io.getbyte
+
+      dont_allow(@byte_input).sysread.with_any_args
+      @io.readpartial(10).should == binary("bc")
+
+      @io.ungetc("あ")
+      @io.readpartial(10).should == binary("あ")
+    end
+
+    it "should read from @byte_input if no bytes available from the buffer" do
+      eof = false
+      stub(@byte_input).eof? { eof }
+
+      mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+      @io.readpartial(4).should == binary("abc")
+
+      mock(@byte_input).sysread(is_a(Integer)) { eof = true; binary("defg") }
+      @io.readpartial(10).should == binary("defg")
+    end
+
+    it "should keep the remaining bytes in the buffer" do
+      @data = [ binary("abc"), binary("defg") ]
+      @io.readpartial(2)
+      @io.ungetbyte(?d.ord)
+      @io.read(3).should == binary("dcd")
+      @io.ungetbyte(?f.ord)
+      @io.readpartial(10).should == binary("fefg")
+    end
+
+    it "should not tries to read again if have succeeded to read something from @byteinput" do
+      dont_allow(@byte_input).sysread.with_any_args
+
+      @io.ungetbyte(?a.ord)
+      @io.readpartial(1024).should == binary("a")
+    end
+
+    it "should raise neither EINTR nor EWOULDBLOCK even if @byte_input raise it" do
+      eof = false
+      stub(@byte_input).eof? { eof }
+
+      mock(@byte_input).sysread(is_a(Integer)) { raise Errno::EINTR }
+      mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
+      mock(@byte_input).sysread(is_a(Integer)) { raise Errno::EWOULDBLOCK }
+      mock(@byte_input).sysread(is_a(Integer)) { eof = true; binary("def") }
+
+      bytes = nil
+      lambda { bytes = @io.readpartial(4) }.should_not raise_error
+      bytes.should == binary("abc")
+
+      bytes = nil
+      lambda { bytes = @io.readpartial(4) }.should_not raise_error
+      bytes.should == binary("def")
+    end
+
+    it "should advance #pos by the length of the returned bytes" do
+      @data = [ binary("abc"), binary("defg"), binary("hijk"), binary("lm") ]
+
+      @io.readpartial(3)
+      @io.pos.should == 3
+      @io.readpartial(2)
+      @io.pos.should == 5
+      @io.readpartial(10)
+      @io.pos.should == 7
+      @io.readpartial(10)
+      @io.pos.should == 11
+      @io.readpartial(1)
+      @io.pos.should == 12
+    end
+
+    it "should return nil if eof" do
+      @io.readpartial(10).should be_nil
+    end
+
+    it "should return an empty string even if eof when the required length is zero" do
+      @io.readpartial(0).should == ""
+    end
+
+    it "should replace the second argument and return it if it is given" do
+      @data = [ binary("abc") ]
+      output = "あいう"
+      returned = @io.readpartial(100, output)
+      returned.should be_equal(output)
+      output.encoding.should == Encoding::ASCII_8BIT
+      output.should == binary("abc")
+    end
+
+    it "should make the second argument empty but return nil if eof" do
+      output = "あいう"
+      @io.readpartial(100, output).should be_nil
+      output.should be_empty
+    end
+  end
+
   describe "#sysread"
   describe "#nread"
   describe "#read_nonblock"

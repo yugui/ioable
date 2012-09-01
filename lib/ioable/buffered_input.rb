@@ -254,6 +254,32 @@ class IOable::BufferedInput
     end
   end
 
+  def readpartial(length = nil, outbuf = "")
+    case @buf.length <=> length
+    when 1
+      outbuf.replace(shiftbuf(length))
+    when 0
+      outbuf.replace(flushbuf)
+    else
+      unless @buf.empty?
+        outbuf.replace(flushbuf)
+      else
+        if @byte_input.eof?
+          outbuf.clear
+          return nil
+        end
+        fillbuf while @buf.empty? and !@byte_input.eof?
+        if @buf.length > length
+          outbuf.replace(shiftbuf(length))
+        else
+          outbuf.replace(flushbuf)
+        end
+      end
+    end
+    @pos += outbuf.bytesize
+    return outbuf
+  end
+
   private
 
   INPUTTABLE_BUF_READ_SIZE = 256
@@ -262,7 +288,7 @@ class IOable::BufferedInput
     raise unless @buf.encoding == Encoding::ASCII_8BIT
     @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE).force_encoding(Encoding::ASCII_8BIT)
     nil
-  rescue Errno::EAGAIN
+  rescue Errno::EAGAIN, Errno::EINTR, Errno::EWOULDBLOCK
     retry
   end
 
