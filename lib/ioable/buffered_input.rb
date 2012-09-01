@@ -1,5 +1,4 @@
 #-*- encoding: US-ASCII -*-
-require 'forwardable'
 require 'ioable/byte_inputtable'
 
 # A wrapper class to provides a full input functionalities based on a wrapped
@@ -12,7 +11,6 @@ require 'ioable/byte_inputtable'
 #
 class IOable::BufferedInput
   include IOable::ByteInputtable
-  extend Forwardable
 
   SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
   EMPTY_BUFFER = "".force_encoding(Encoding::ASCII_8BIT).freeze
@@ -49,7 +47,6 @@ class IOable::BufferedInput
 
   attr_reader :external_encoding, :internal_encoding
   attr_accessor :lineno
-  def_delegators :@byte_input, :sysread
 
   def set_encoding(*args)
     unless (1..3).include? args.size
@@ -278,6 +275,16 @@ class IOable::BufferedInput
     end
     @pos += outbuf.bytesize
     return outbuf
+  end
+
+  def sysread(*args)
+    raise IOError, "sysread for a buffered IO" unless @buf.empty?
+    case args.size
+    when 1, 2
+      @byte_input.sysread(*args)
+    else
+      raise ArgumentError, "wrong number of arguments #{args.size} for 1..2"
+    end
   end
 
   private

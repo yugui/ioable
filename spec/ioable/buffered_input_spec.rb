@@ -1052,7 +1052,7 @@ describe IOable::BufferedInput do
       @io.readpartial(2).encoding.should == Encoding::ASCII_8BIT
     end
 
-    it "should return the bufferred bytes if available" do
+    it "should return the buffered bytes if available" do
       stub(@byte_input).eof? { false }
 
       mock(@byte_input).sysread(is_a(Integer)) { binary("abc") }
@@ -1149,7 +1149,29 @@ describe IOable::BufferedInput do
     end
   end
 
-  describe "#sysread"
+  describe "#sysread" do
+    it "should be forwrded to @byte_input" do
+      len = Object.new
+      outbuf = Object.new
+      mock(@byte_input).sysread(len, outbuf) { outbuf }
+
+      @io.sysread(len, outbuf)
+    end
+
+    it "should raise an IOError if the buffer is not empty" do
+      @io.ungetbyte(1)
+      lambda { @io.sysread(1) }.should raise_error(IOError, "sysread for a buffered IO")
+    end
+
+    it "should not rescue any error" do
+      stub(@byte_input).sysread(is_a(Integer)) { raise Errno::EAGAIN }
+      lambda { @io.sysread(3) }.should raise_error(Errno::EAGAIN)
+
+      stub(@byte_input).sysread(is_a(Integer)) { raise EOFError }
+      lambda { @io.sysread(3) }.should raise_error(EOFError)
+    end
+  end
+
   describe "#nread"
   describe "#read_nonblock"
 end
