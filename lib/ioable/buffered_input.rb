@@ -57,7 +57,7 @@ class IOable::BufferedInput
     end
     opt = args.last.kind_of?(Hash) ? args.pop : {}
     case args.size
-    when 1 
+    when 1
       if args[0].kind_of?(Encoding)
         initialize_encodings(args[0], Encoding::default_internal, opt)
       else
@@ -196,6 +196,7 @@ class IOable::BufferedInput
     else
       if rs.empty?
         paragraph_mode = true
+        skip_empty_lines
         rs = "\n\n"
       end
       if limit.nil?
@@ -207,15 +208,7 @@ class IOable::BufferedInput
       else
         line = naive_gets_raw(rs, limit)
       end
-      if paragraph_mode
-        # consumes all subsequent line breaks.
-        until index = @buf.index(/[^\n]/on)
-          line << flushbuf
-          break if @byte_input.eof?
-          fillbuf
-        end
-        line << shiftbuf(index) if index
-      end
+      skip_empty_lines if paragraph_mode
     end
     @pos += line.bytesize
     line.force_encoding(@external_encoding)
@@ -250,6 +243,7 @@ class IOable::BufferedInput
   private
 
   INPUTTABLE_BUF_READ_SIZE = 256
+  # Tries to read more bytes from @byte_input and appends it to the buffer.
   def fillbuf
     raise unless @buf.encoding == Encoding::ASCII_8BIT
     @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE).force_encoding(Encoding::ASCII_8BIT)
@@ -258,6 +252,7 @@ class IOable::BufferedInput
     retry
   end
 
+  # Consumes a sepcified length of bytes from the buffer and return the bytes.
   def shiftbuf(len = 1)
     if $DEBUG
       raise unless @buf.size >= len
@@ -266,8 +261,23 @@ class IOable::BufferedInput
     return @buf[0, len].tap { @buf[0, len] = "" }
   end
 
+  # Clears the internal buffer and returns the original buffer.
   def flushbuf
     return @buf.tap{ @buf = EMPTY_BUFFER.dup }
+  end
+
+
+  # Consumes the subsequent empty lines from the buffer and discards the empty lines.
+  #
+  # Returns true if @byte_input still continues, or false if it reached eof.
+  def skip_empty_lines
+    until index = @buf.index(/[^\n]/on)
+      @buf.clear
+      return false if @byte_input.eof?
+      fillbuf
+    end
+    shiftbuf(index)
+    return true
   end
 
   # Similar to getc but:

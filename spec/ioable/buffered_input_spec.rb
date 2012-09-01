@@ -871,11 +871,11 @@ describe IOable::BufferedInput do
 
       it "can handle more than one empty lines" do
         @data = [ binary("\nabc\n\ndef\n\n\nghi\n\n\n\njkl\n") ]
-        @io.gets.should == "abc\n\n"
-        @io.gets.should == "def\n\n"
-        @io.gets.should == "ghi\n\n"
-        @io.gets.should == "jkl\n"
-        @io.gets.should == nil
+        @io.gets("").should == "abc\n\n"
+        @io.gets("").should == "def\n\n"
+        @io.gets("").should == "ghi\n\n"
+        @io.gets("").should == "jkl\n"
+        @io.gets("").should == nil
       end
 
       it "should return at most the specified number of bytes if limit is specified" do
