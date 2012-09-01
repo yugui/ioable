@@ -265,26 +265,19 @@ class IOable::BufferedInput
       return EMPTY_BUFFER.dup
     end
 
-    case @buf.length <=> length
-    when 1
-      outbuf.replace(shiftbuf(length))
-    when 0
-      outbuf.replace(flushbuf)
-    else
-      unless @buf.empty?
-        outbuf.replace(flushbuf)
+    if @buf.empty?
+      if @byte_input.eof?
+        outbuf.clear
+        return nil
       else
-        if @byte_input.eof?
-          outbuf.clear
-          return nil
-        end
-        fillbuf while @buf.empty? and !@byte_input.eof?
-        if @buf.length > length
-          outbuf.replace(shiftbuf(length))
-        else
-          outbuf.replace(flushbuf)
-        end
+        fillbuf
       end
+    end
+
+    if @buf.length > length
+      outbuf.replace(shiftbuf(length))
+    else
+      outbuf.replace(flushbuf)
     end
     @pos += outbuf.bytesize
     return outbuf
