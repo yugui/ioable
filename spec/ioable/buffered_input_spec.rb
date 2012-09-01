@@ -660,7 +660,7 @@ describe IOable::BufferedInput do
         @data = [ binary("abあ"), binary("d\nef") ]
 
         @io.set_encoding(Encoding::UTF_8, Encoding::CP932)
-        p @io.gets
+        @io.gets
         @io.pos.should == 7
         @io.gets
         @io.pos.should == 9
