@@ -869,8 +869,16 @@ describe IOable::BufferedInput do
         @io.gets.should == "jk"
       end
 
+      it "should use empty lines as the separator if rs is an empty string" do
+        @data = [ binary("abc\n\nd"), binary("efgh\ni\n"), binary("\njk") ]
+
+        @io.gets("").should == "abc\n\n"
+        @io.gets("").should == "defgh\ni\n\n"
+        @io.gets("").should == "jk"
+      end
+
       it "can handle more than one empty lines" do
-        @data = [ binary("\nabc\n\ndef\n\n\nghi\n\n\n\njkl\n") ]
+        @data = [ binary("abc\n\ndef\n\n\nghi\n\n\n\njkl\n") ]
         @io.gets("").should == "abc\n\n"
         @io.gets("").should == "def\n\n"
         @io.gets("").should == "ghi\n\n"
@@ -878,16 +886,57 @@ describe IOable::BufferedInput do
         @io.gets("").should == nil
       end
 
+
+      it "should ignore the preceeding empty lines" do
+        @data = [ binary("\nabc\n"), binary("\nd") ]
+
+        @io.gets("").should == "abc\n\n"
+        @io.gets("").should == "d"
+        @io.gets("").should == nil
+      end
+
+      it "should ignore the trailing empty lines" do
+        @data = [ binary("abc\n"), binary("\nd\n\n\n\n") ]
+
+        @io.gets("").should == "abc\n\n"
+        @io.gets("").should == "d\n\n"
+        @io.gets("").should == nil
+      end
+
+
       it "should return at most the specified number of bytes if limit is specified" do
-        @data = [ binary("abc\n\nd"), binary("efgh\n\ni\n"), binary("\njk") ]
+        @data = [ binary("abc\n\nd"), binary("efgh\ni\n"), binary("\njk") ]
         @io.gets("", 3).should == "abc"
         @io.gets("", 1).should == "d"
-        @io.gets("", 5).should == "efgh\n"
-        @io.gets("", 2).should == "i\n"
+        @io.gets("", 2).should == "ef"
+        @io.gets("", 4).should == "gh\ni"
         @io.gets("", 2).should == "jk"
       end
 
-      it "should not break a multibyte character at the specified limit"
+      it "should not break a multibyte character at the specified limit" do
+        @data = [ binary("\nabあ\n\ncd\xFF\xFF"), binary("あ\ni\n\xE3"), binary("\x81\x82\xFF\n\n") ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932, invalid: :replace)
+
+        line = @io.gets("", 3)
+        line.should == "abあ".encode(Encoding::CP932)
+        line = @io.gets("", 4)
+        line.should == "cd\xFF\xFF".encode(Encoding::CP932, invalid: :replace)
+        line = @io.gets("", 2)
+        line.should == "あ".encode(Encoding::CP932)
+        line = @io.gets("", 3)
+        line.should == "i\nあ".encode(Encoding::CP932)
+        line = @io.gets("", 2)
+        line.should == "\xFF\n".encode(Encoding::CP932, invalid: :replace)
+        @io.gets("", 2).should == nil
+      end
+
+      it "should count the specified length in #external_encoding" do
+        @data = [ binary("aあい"), ]
+        @io.set_encoding(Encoding::UTF_8, Encoding::CP932, invalid: :replace)
+
+        line = @io.gets("", 4)
+        line.should == "aあ".encode(Encoding::CP932)
+      end
     end
 
   end
