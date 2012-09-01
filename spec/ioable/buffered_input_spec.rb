@@ -69,30 +69,52 @@ describe IOable::BufferedInput do
       lambda { @io.ungetbyte("a") }.should_not raise_error
     end
 
-    it "should let the next call of #getbyte return the given byte" do
-      @io.ungetbyte(1)
-      dont_allow(@byte_input).eof?
-      dont_allow(@byte_input).sysread.with_any_args
-      @io.getbyte.should == 1
-
-      @io.ungetbyte("a")
-      dont_allow(@byte_input).eof?
-      dont_allow(@byte_input).sysread.with_any_args
-      @io.getbyte.should == ?a.ord
+    it "should not accept anything else" do
+      something_else = Object.new
+      lambda { @io.ungetc(something_else) }.should raise_error(TypeError)
     end
 
-    it "should decrease #pos by 1" do
-      @io.ungetbyte(1)
-      @io.pos.should == -1
-      @io.getbyte
-      @io.pos.should == 0
+    describe "with side effects to the buffer" do
+      before do
+        @data = []
+        stub(@byte_input).sysread(is_a(Integer)) { @data.shift }
+        stub(@byte_input).eof?{ @data.empty? }
+      end
 
-      stub(@byte_input).eof? { false }
-      stub(@byte_input).sysread(is_a(Integer)) { binary("a") }
-      @io.getbyte
-      @io.pos.should == 1
-      @io.ungetbyte("b")
-      @io.pos.should == 0
+      it "should let the next call of #getbyte return the given byte" do
+        @io.ungetbyte(1)
+        dont_allow(@byte_input).eof?
+        dont_allow(@byte_input).sysread.with_any_args
+        @io.getbyte.should == 1
+
+        @io.ungetbyte("a")
+        dont_allow(@byte_input).eof?
+        dont_allow(@byte_input).sysread.with_any_args
+        @io.getbyte.should == ?a.ord
+      end
+
+
+      it "should let the next call of a buffered input method combine the given byte to the buffer" do
+        @data = [ binary("\x81\x82\x81\x82") ]
+        @io.ungetbyte(0xE3)
+        @io.getc.should == "あ"
+
+        @io.ungetbyte("\xE3")
+        @io.getc.should == "あ"
+      end
+
+      it "should decrease #pos by 1" do
+        @io.ungetbyte(1)
+        @io.pos.should == -1
+        @io.getbyte
+        @io.pos.should == 0
+
+        @data = [ binary("a") ]
+        @io.getbyte
+        @io.pos.should == 1
+        @io.ungetbyte("b")
+        @io.pos.should == 0
+      end
     end
   end
 
@@ -938,13 +960,77 @@ describe IOable::BufferedInput do
         line.should == "aあ".encode(Encoding::CP932)
       end
     end
-
   end
 
   describe "#ungetc" do
-    it "should accept a byte" #do
-      #@io.ungetc("a")
-    #end
+    it "should accept a single byte character" do
+      lambda { @io.ungetc("a") }.should_not raise_error
+    end
+
+    it "should accept a multibyte character" do
+      lambda { @io.ungetc("あ") }.should_not raise_error
+    end
+
+    it "should accept a byte for compatibility" do
+      lambda { @io.ungetc(1) }.should_not raise_error
+    end
+
+    it "should not accept any negative integer" do
+      lambda { @io.ungetc(0) }.should_not raise_error
+      lambda { @io.ungetc(-1) }.should raise_error(TypeError)
+    end
+
+    it "should not accept >= 256" do
+      lambda { @io.ungetc(255) }.should_not raise_error
+      lambda { @io.ungetc(256) }.should raise_error(TypeError)
+    end
+
+    it "should not accept anything else" do
+      something_else = Object.new
+      lambda { @io.ungetc(something_else) }.should raise_error(TypeError)
+    end
+
+    describe "with side effects to the buffer" do
+      before do
+        @data = []
+        stub(@byte_input).sysread(is_a(Integer)) { @data.shift }
+        stub(@byte_input).eof?{ @data.empty? }
+      end
+
+      it "should let the next call of #getc return the given byte" do
+        @io.ungetc("あ")
+        dont_allow(@byte_input).eof?
+        dont_allow(@byte_input).sysread.with_any_args
+        @io.getc.should == "あ"
+
+        @io.ungetbyte(?a.ord)
+        dont_allow(@byte_input).eof?
+        dont_allow(@byte_input).sysread.with_any_args
+        @io.getc.should == 'a'
+      end
+
+      it "should let the next call of a buffered input method combine the given byte to the buffer" do
+        @data = [ binary("\x81\x82\x81\x82") ]
+        @io.ungetc(0xE3)
+        @io.getc.should == "あ"
+
+        @io.ungetc("\xE3")
+        @io.getc.should == "あ"
+      end
+
+      it "should decrease #pos by the byte length of the given character" do
+        @io.ungetc("あ")
+        @io.pos.should == -3
+        @io.getc
+        @io.pos.should == 0
+
+        @data = [ binary("a") ]
+        @io.getbyte
+        @io.pos.should == 1
+        @io.ungetbyte("b")
+        @io.pos.should == 0
+      end
+    end
   end
 
   describe "#readpartial"

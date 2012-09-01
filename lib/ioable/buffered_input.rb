@@ -112,13 +112,27 @@ class IOable::BufferedInput
       @buf[0...0] = b.chr
 
     when String
-      @buf[0...0] = b.chr
+      @buf[0...0] = b.dup.force_encoding(Encoding::ASCII_8BIT)[0]
 
     else
-      raise TypeError, "expected a byte or a string, but got #{b.class}"
+      raise TypeError, "expected a byte or a string, but got a #{b.class}"
     end
 
     @pos -= 1
+  end
+
+  def ungetc(c)
+    case c
+    when String
+      @buf[0...0] = c.force_encoding(Encoding::ASCII_8BIT)
+      @pos -= c.bytesize
+    when Integer
+      raise TypeError, "must be in 0...256, but got #{c}" unless (0...256).include?(c)
+      @buf[0...0] = c.chr
+      @pos -= 1
+    else
+      raise TypeError, "expected a character, but got a #{c.class}"
+    end
   end
 
   def seek(amount, whence = IO::SEEK_SET)
