@@ -1,5 +1,6 @@
 #-*- encoding: US-ASCII -*-
 require 'ioable/byte_inputtable'
+require 'stringio'
 
 # A wrapper class to provides a full input functionalities based on a wrapped
 # byte stream.
@@ -12,8 +13,8 @@ require 'ioable/byte_inputtable'
 class IOable::BufferedInput
   include IOable::ByteInputtable
 
-  SUPPORT_ENCODING = RUBY_VERSION >= "1.9"
   EMPTY_BUFFER = "".force_encoding(Encoding::ASCII_8BIT).freeze
+  BUF_CLEARER = StringIO.new(EMPTY_BUFFER.clone)
 
   # byte_input:: The byte stream to wrap.
   # external:: External encoding of this input. Ignored if the Ruby is a 1.8.x.
@@ -22,13 +23,24 @@ class IOable::BufferedInput
   def initialize(byte_input,
                  external = Encoding::default_external, internal = nil,
                  opt = nil)
-    @pos = 0
     @lineno = 0
     @byte_input = byte_input
-    @buf = EMPTY_BUFFER.dup
-    return unless SUPPORT_ENCODING
+    @nonblock_capable = byte_input.respond_to?(:nonblock=)
+
+    # StringIO as the buffer to use some lowlevel byte operations.
+    @buf = StringIO.new(EMPTY_BUFFER.dup)
     initialize_encodings(external, internal, opt)
   end
+
+  attr_accessor :lineno, :pos
+
+  def pos
+    @byte_input.pos + @buf.pos
+  end
+
+  ###
+  ### Encoding Operations
+  ###
 
   def initialize_encodings(external, internal = nil, opt = nil)
     @external_encoding =
@@ -46,7 +58,6 @@ class IOable::BufferedInput
   private :initialize_encodings
 
   attr_reader :external_encoding, :internal_encoding
-  attr_accessor :lineno
 
   def set_encoding(*args)
     unless (1..3).include? args.size
@@ -93,69 +104,39 @@ class IOable::BufferedInput
   end
 
   def getbyte
-    if @buf.empty?
-      return nil if @byte_input.eof?
-      fillbuf
-    end
-    b = shiftbuf.ord
-    @pos += 1
-    return b
+    fillbuf unless buf_pending? || @byte_input.eof?
+    b = read_buffer(1)
+    return b && b.ord
   end
 
   def ungetbyte(b)
-    case b
-    when Integer
-      raise TypeError, "must be in 0...256, but got #{b}" unless (0...256).include?(b)
-      @buf[0...0] = b.chr
-
-    when String
-      @buf[0...0] = b.dup.force_encoding(Encoding::ASCII_8BIT)[0]
-
-    else
-      raise TypeError, "expected a byte or a string, but got a #{b.class}"
-    end
-
-    @pos -= 1
+    @buf.ungetbyte(b)
+    nil
   end
 
   def ungetc(c)
-    case c
-    when String
-      @buf[0...0] = c.force_encoding(Encoding::ASCII_8BIT)
-      @pos -= c.bytesize
-    when Integer
-      raise TypeError, "must be in 0...256, but got #{c}" unless (0...256).include?(c)
-      @buf[0...0] = c.chr
-      @pos -= 1
-    else
-      raise TypeError, "expected a character, but got a #{c.class}"
-    end
+    @buf.ungetc(c)
+    nil
   end
 
   def seek(amount, whence = IO::SEEK_SET)
-    @buf.clear
+    pos = self.pos
+    clear_buffer
     if whence == IO::SEEK_CUR
-      @pos += amount
-      return super(@pos, IO::SEEK_SET)
+      return super(pos, IO::SEEK_SET)
     else
       return super
     end
   end
 
   def sysseek(amount, whence = IO::SEEK_SET)
-    raise Errno::EINVAL, "sysseek for buffered IO" unless @buf.empty?
+    raise Errno::EINVAL, "sysseek for buffered IO" if buf_pending?
     @pos = @byte_input.sysseek(amount, whence)
   end
 
-  MAX_ASCII_BYTE = 127
-  # The maximum # of bytes per character in the encoding Ruby supports
-  MAX_BYTES_FOR_CHAR = 5
   def getc
-    if char = getc_raw
-      @pos += char.bytesize
-      char = to_internal(char)
-    end
-    return char
+    char = read_char_from_buffer
+    return char.empty? ? nil : to_internal(char)
   end
 
   def gets(*args)
@@ -199,10 +180,12 @@ class IOable::BufferedInput
       end
     end
 
-    if @buf.empty? and @byte_input.eof?
-      return limit == 0 ?
-        "".force_encoding(@internal_encoding || Encoding.default_internal || @external_encoding) :
-        nil
+    unless buf_pending? || @byte_input.eof?
+      if limit == 0
+        return "".force_encoding(@internal_encoding || Encoding.default_internal || @external_encoding) :
+      else
+        return nil
+      end
     end
     if rs.nil?
       if limit.nil?
@@ -257,34 +240,18 @@ class IOable::BufferedInput
     end
   end
 
-  def readpartial(length = nil, outbuf = "")
-    length = ConvertHelper.try_convert(length, Integer, :to_int)
-    if length < 0
-      raise ArgumentError, "the given length is negative"
-    elsif length == 0
-      return EMPTY_BUFFER.dup
-    end
+  def readpartial(length, outbuf = "")
+    getpartial(length, outbuf, false)
+  rescue Errno::EWOULDBLOCK, Errno::EINTR
+    retry
+  end
 
-    if @buf.empty?
-      if @byte_input.eof?
-        outbuf.clear
-        return nil
-      else
-        fillbuf
-      end
-    end
-
-    if @buf.length > length
-      outbuf.replace(shiftbuf(length))
-    else
-      outbuf.replace(flushbuf)
-    end
-    @pos += outbuf.bytesize
-    return outbuf
+  def read_nonblock(length, outbuf = "")
+    getpartial(length, outbuf, true)
   end
 
   def sysread(*args)
-    raise IOError, "sysread for a buffered IO" unless @buf.empty?
+    raise IOError, "sysread for a buffered IO" if buf_pending?
     case args.size
     when 1, 2
       @byte_input.sysread(*args)
@@ -294,32 +261,6 @@ class IOable::BufferedInput
   end
 
   private
-
-  INPUTTABLE_BUF_READ_SIZE = 256
-  # Tries to read more bytes from @byte_input and appends it to the buffer.
-  def fillbuf
-    raise unless @buf.encoding == Encoding::ASCII_8BIT
-    @buf << @byte_input.sysread(INPUTTABLE_BUF_READ_SIZE).force_encoding(Encoding::ASCII_8BIT)
-    nil
-  rescue Errno::EAGAIN, Errno::EINTR, Errno::EWOULDBLOCK
-    retry
-  end
-
-  # Consumes a sepcified length of bytes from the buffer and return the bytes.
-  def shiftbuf(len = 1)
-    if $DEBUG
-      raise unless @buf.size >= len
-    end
-
-    return @buf[0, len].tap { @buf[0, len] = "" }
-  end
-
-  # Clears the internal buffer and returns the original buffer.
-  def flushbuf
-    return @buf.tap{ @buf = EMPTY_BUFFER.dup }
-  end
-
-
   # Consumes the subsequent empty lines from the buffer and discards the empty lines.
   #
   # Returns true if @byte_input still continues, or false if it reached eof.
@@ -479,5 +420,95 @@ class IOable::BufferedInput
   rescue Object
     @buf[0...0] = line
     raise
+  end
+
+  def getpartial(length, outbuf, nonblock)
+    length = ConvertHelper.try_convert(length, Integer, :to_int)
+    if length < 0
+      raise ArgumentError, "the given length is negative"
+    elsif length == 0
+      return EMPTY_BUFFER.dup
+    end
+
+    read_buffer(length, outbuf)
+    if outbuf.empty?
+      if @byte_input.eof?
+        outbuf.clear
+        return nil
+      else
+        with_nonblock(nonblock) do
+          read_stream(outbuf)
+        end
+      end
+    end
+
+    return outbuf
+  end
+
+  def with_nonblock(nonblock)
+    if nonblock and @nonblock_capable and !@byte_input.nonblock
+       @byte_input.nonblock = false
+      begin
+        yield
+      ensure
+        @byte_input.nonblock = true
+      end
+    else
+      yield
+    end
+  end
+
+
+  ##
+  # The most basic buffering methods.
+  # Only these functions can touch @buf.
+  # Only these functions and #seek can update @pos.
+  
+  INPUTTABLE_BUF_READ_SIZE = 1024
+  # Tries to read more bytes from @byte_input and appends it to the buffer.
+  # Reads at least one byte before returning.
+  def fillbuf
+    raise if buf_pending?
+    @buf.rewind
+    read_stream(INPUTTABLE_BUF_READ_SIZE, @buf.string)
+    nil
+  rescue Errno::EAGAIN, Errno::EINTR, Errno::EWOULDBLOCK
+    retry
+  end
+
+  def read_stream(len, outbuf = '')
+    @byte_input.sysread(len, outbuf).force_encoding(Encoding::ASCII_8BIT)
+    nil
+  end
+
+  def read_buffer(len, outbuf = '')
+    @buf.read(len, outbuf)
+    nil
+  end
+
+  def clear_buffer
+    @buf.rewind
+    # Makes @buf.string empty without letting it reallocate.
+    BUF_CLEARER.read(1, @buf.string)
+    nil
+  end
+
+  def buf_pending?
+    return !@buf.eof?
+  end
+
+  # The maximum # of bytes per character in the encoding Ruby supports
+  MAX_BYTES_FOR_CHAR = 5
+  def read_char_from_buffer
+    c = EMPTY_BUF.dup
+    MAX_BYTES_FOR_CHAR.times do
+      fillbuf unless buf_pending? || @byte_input.eof?
+      c << @buf.getbyte.chr.force_encoding(@external_encoding)
+      return c if c.valid_encoding?
+    end
+    c, rest = c[0], c[1..-1]
+    # StringIO#ungetc allows to return multiple charaters.
+    @buf.ungetc(rest)
+    return c
   end
 end

@@ -86,6 +86,10 @@ describe IOable::BufferedInput do
     it "should accept a single byte string" do
       lambda { @io.ungetbyte("a") }.should_not raise_error
     end
+    it "should accept nil" do
+      lambda { @io.ungetbyte(nil) }.should_not raise_error
+    end
+
 
     it "should not accept anything else" do
       something_else = Object.new
@@ -132,6 +136,11 @@ describe IOable::BufferedInput do
         @io.pos.should == 1
         @io.ungetbyte("b")
         @io.pos.should == 0
+      end
+
+      it "should not decrease #pos if the given value is nil" do
+        @io.ungetbyte(nil)
+        @io.po.should == 0
       end
     end
   end
